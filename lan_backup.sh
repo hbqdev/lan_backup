@@ -304,6 +304,21 @@ install_yq() {
         fi
     fi
     
+    # Check if sshpass is installed
+    if ! command -v sshpass &> /dev/null; then
+        echo "❌ sshpass is not installed. Attempting to install it..."
+        if command -v apt-get &>/dev/null; then
+            sudo apt-get update && sudo apt-get install -y sshpass || apt-get update && apt-get install -y sshpass
+        elif command -v yum &>/dev/null; then
+            sudo yum install -y sshpass || yum install -y sshpass
+        elif command -v dnf &>/dev/null; then
+            sudo dnf install -y sshpass || dnf install -y sshpass
+        else
+            echo "❌ ERROR: Failed to install sshpass. Please install it manually."
+            exit 1
+        fi
+    fi
+    
     YQ_VERSION=$(yq --version 2>&1 | head -n 1)
     echo "Using YQ version: $YQ_VERSION"
     
@@ -392,19 +407,40 @@ install_yq() {
                 fi
                 
                 # Check again if rsync is available (it might have been installed)
-                if sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$hostname" "which rsync" &>/dev/null; then
-                    # Sync files with force options
-                    echo "  Starting forced rsync..."
+                if sshpass -v "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$hostname" "which rsync" &>/dev/null; then
+                    # Ensure destination directory exists and is accessible
+                    if [ ! -d "$dest_path" ]; then
+                        echo "  Re-creating destination directory: $dest_path"
+                        mkdir -p "$dest_path"
+                        if [ ! -d "$dest_path" ]; then
+                            echo "  ❌ ERROR: Could not create destination directory: $dest_path"
+                            continue
+                        fi
+                    fi
                     
-                    # Try with hostname first - added force options
-                    rsync -av --progress --force --ignore-errors --delete \
+                    # Use absolute paths and add timeout
+                    cd "$SCRIPT_DIR" || {
+                        echo "  ❌ ERROR: Could not change to script directory: $SCRIPT_DIR"
+                        continue
+                    }
+                    
+                    echo "  Starting forced rsync with absolute paths..."
+                    rsync -av --progress --force --ignore-errors --delete --timeout=60 \
                         --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
                         "$user@$hostname:$path/" "$dest_path/" || {
                         echo "  Rsync with hostname failed, trying with IP..."
                         # If hostname fails, try with IP
-                        rsync -av --progress --force --ignore-errors --delete \
+                        rsync -av --progress --force --ignore-errors --delete --timeout=60 \
                             --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
-                            "$user@$ip:$path/" "$dest_path/"
+                            "$user@$ip:$path/" "$dest_path/" || {
+                            echo "  ❌ Rsync failed. Trying one more time with different options..."
+                            # Try one more time with different options
+                            rsync -rlptDv --progress --force --ignore-errors --timeout=60 \
+                                --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
+                                "$user@$ip:$path/" "$dest_path/" || {
+                                echo "  ❌ All rsync attempts failed. Some files may not have been copied."
+                            }
+                        }
                     }
                 fi
                 
@@ -499,18 +535,39 @@ install_yq() {
                 
                 # Check again if rsync is available (it might have been installed)
                 if sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$hostname" "which rsync" &>/dev/null; then
-                    # Sync files with force options
-                    echo "  Starting forced rsync..."
+                    # Ensure destination directory exists and is accessible
+                    if [ ! -d "$dest_path" ]; then
+                        echo "  Re-creating destination directory: $dest_path"
+                        mkdir -p "$dest_path"
+                        if [ ! -d "$dest_path" ]; then
+                            echo "  ❌ ERROR: Could not create destination directory: $dest_path"
+                            continue
+                        fi
+                    fi
                     
-                    # Try with hostname first - added force options
-                    rsync -av --progress --force --ignore-errors --delete \
+                    # Use absolute paths and add timeout
+                    cd "$SCRIPT_DIR" || {
+                        echo "  ❌ ERROR: Could not change to script directory: $SCRIPT_DIR"
+                        continue
+                    }
+                    
+                    echo "  Starting forced rsync with absolute paths..."
+                    rsync -av --progress --force --ignore-errors --delete --timeout=60 \
                         --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
                         "$user@$hostname:$path/" "$dest_path/" || {
                         echo "  Rsync with hostname failed, trying with IP..."
                         # If hostname fails, try with IP
-                        rsync -av --progress --force --ignore-errors --delete \
+                        rsync -av --progress --force --ignore-errors --delete --timeout=60 \
                             --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
-                            "$user@$ip:$path/" "$dest_path/"
+                            "$user@$ip:$path/" "$dest_path/" || {
+                            echo "  ❌ Rsync failed. Trying one more time with different options..."
+                            # Try one more time with different options
+                            rsync -rlptDv --progress --force --ignore-errors --timeout=60 \
+                                --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
+                                "$user@$ip:$path/" "$dest_path/" || {
+                                echo "  ❌ All rsync attempts failed. Some files may not have been copied."
+                            }
+                        }
                     }
                 fi
                 
