@@ -524,6 +524,8 @@ install_yq() {
                     ["incremental"]="--archive --hard-links --acls --xattrs --backup --backup-dir=\"$(realpath "$dest_path")/../.snapshots/$(date +%Y-%m-%d_%H-%M-%S)\" --progress --stats --timeout=120 --no-compress"
                     ["safe"]="--archive --hard-links --acls --xattrs --update --progress --stats --timeout=120 --no-compress"
                     ["gentle"]="--archive --update --no-compress --timeout=120 --contimeout=60 --inplace --size-only --progress --stats"
+                    ["large-files"]="--archive --whole-file --block-size=1024K --info=progress2 --no-inc-recursive --timeout=120 --no-compress"
+                    ["large-incremental"]="--archive --whole-file --block-size=1024K --hard-links --acls --xattrs --backup --backup-dir=\"$(realpath "$dest_path")/../.snapshots/$(date +%Y-%m-%d_%H-%M-%S)\" --info=progress2 --no-inc-recursive --timeout=180 --no-compress"
                 )
                 
                 # Default strategy (can be overridden in config)
@@ -543,7 +545,7 @@ install_yq() {
                 rsync_opts="${backup_strategies[$backup_strategy]}"
                 
                 # Add common options
-                rsync_opts="$rsync_opts --human-readable --partial --info=progress2"
+                rsync_opts="$rsync_opts --human-readable --partial --info=progress2 --no-inc-recursive --block-size=1024K"
                 
                 # Add bandwidth limit if set
                 if [ "$host_bandwidth_limit" -gt 0 ]; then
@@ -751,9 +753,11 @@ install_yq() {
                 declare -A backup_strategies
                 backup_strategies=(
                     ["mirror"]="--archive --hard-links --acls --xattrs --delete --delete-excluded --progress --stats --timeout=120 --no-compress"
-                    ["incremental"]="--archive --hard-links --acls --xattrs --backup --backup-dir=\"$(realpath "$dest_path")/../.snapshots/$(date +%Y-%m-%d_%H-%M-%S)\" --progress --stats --timeout=120 --no-compress"
-                    ["safe"]="--archive --hard-links --acls --xattrs --update --progress --stats --timeout=120 --no-compress"
-                    ["gentle"]="--archive --update --no-compress --timeout=120 --contimeout=60 --inplace --size-only --progress --stats"
+                    ["incremental"]="--archive --hard-links --acls --xattrs --backup --backup-dir=\"$(realpath "$dest_path")/../.snapshots/$(date +%Y-%m-%d_%H-%M-%S)\" --progress --stats --timeout=120 --no-compress --block-size=1024K"
+                    ["safe"]="--archive --hard-links --acls --xattrs --update --progress --stats --timeout=120 --no-compress --block-size=1024K"
+                    ["gentle"]="--archive --update --no-compress --timeout=120 --contimeout=60 --inplace --size-only --progress --stats --block-size=1024K"
+                    ["large-files"]="--archive --whole-file --block-size=1024K --info=progress2 --no-inc-recursive --timeout=120 --no-compress"
+                    ["large-incremental"]="--archive --whole-file --block-size=1024K --hard-links --acls --xattrs --backup --backup-dir=\"$(realpath "$dest_path")/../.snapshots/$(date +%Y-%m-%d_%H-%M-%S)\" --info=progress2 --no-inc-recursive --timeout=180 --no-compress"
                 )
                 
                 # Default strategy (can be overridden in config)
@@ -773,7 +777,7 @@ install_yq() {
                 rsync_opts="${backup_strategies[$backup_strategy]}"
                 
                 # Add common options
-                rsync_opts="$rsync_opts --human-readable --partial --info=progress2"
+                rsync_opts="$rsync_opts --human-readable --partial --info=progress2 --no-inc-recursive --block-size=1024K"
                 
                 # Add bandwidth limit if set
                 if [ "$host_bandwidth_limit" -gt 0 ]; then
