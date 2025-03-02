@@ -146,7 +146,7 @@ If the backup script is causing network issues:
 
 ## 🔐 Root-Owned Files
 
-The script now automatically handles root-owned files:
+The script automatically handles root-owned files:
 
 1. **🔍 Automatic Detection**:
    - The script checks for root-owned files in each backup path
