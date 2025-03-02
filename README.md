@@ -52,10 +52,6 @@ hosts:
 - `sshpass` for password-based SSH authentication
 - `yq` for YAML parsing (supports both Go and Python versions)
 - `rsync` for efficient file transfers (automatically installed if missing)
-
-## Security Improvements
-
-This system now uses a more secure approach for password management:
 - Passwords are stored in a separate `.env` file with restricted permissions
 - The `.env` file can be excluded from version control
 - Configuration and secrets are properly separated
@@ -69,5 +65,5 @@ If you encounter rsync compression issues, try one of these solutions:
 ## License
 
 MIT
-EOF
+
 
