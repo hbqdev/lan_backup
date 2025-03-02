@@ -6,13 +6,15 @@ A simple, secure system for backing up data from multiple hosts on a local netwo
 
 - Backs up multiple hosts and paths
 - Supports both hostname and IP-based connections
-- Multiple backup strategies (mirror, incremental, safe)
+- Multiple backup strategies (mirror, incremental, safe, gentle)
 - Incremental backups with configurable snapshot retention
 - Automatically detects and adapts to different YQ versions
 - Automatically installs rsync on remote hosts if missing
 - Falls back to SCP if rsync installation fails
 - Secure password management via environment file
 - Bandwidth control with configurable limits
+- Network-friendly options to prevent connection saturation
+- Configurable delays between host backups
 - File exclusion patterns support
 - Detailed logging with statistics reporting
 - Automatic fallback to safer strategies if preferred strategy fails
@@ -35,7 +37,7 @@ The backup system is now completely self-contained in a single script. To get st
 
 ## Backup Strategies
 
-The script supports three different backup strategies that can be configured per host:
+The script supports four different backup strategies that can be configured per host:
 
 1. **Mirror** (`mirror`):
    - Creates an exact copy of the source at the destination
@@ -50,6 +52,11 @@ The script supports three different backup strategies that can be configured per
 3. **Safe** (`safe`):
    - Only adds or updates files, never deletes anything
    - Good for cautious backups where data preservation is critical
+
+4. **Gentle** (`gentle`):
+   - Network-friendly strategy that minimizes bandwidth usage
+   - Uses size-only comparison and in-place updates to reduce network traffic
+   - Best for unstable networks or when backing up over slow connections
 
 ## Configuration
 
@@ -68,7 +75,7 @@ hosts:
     # Optional: Set bandwidth limit in KB/s for this host (overrides global setting)
     # bandwidth_limit: 2048
     
-    # Optional: Backup strategy (mirror, incremental, safe)
+    # Optional: Backup strategy (mirror, incremental, safe, gentle)
     # backup_strategy: incremental
     
     # Optional: Maximum number of snapshots to keep (for incremental strategy)
@@ -95,8 +102,29 @@ Usage: ./lan_backup.sh [options]
 Options:
   --bwlimit, --bandwidth-limit VALUE  Set bandwidth limit in KB/s (default: 5120)
   --unlimited                         Run without bandwidth limits
+  --sleep, --sleep=VALUE              Set sleep time between hosts in seconds (default: 30)
+  --no-sleep                          Don't sleep between hosts
   --help                              Show this help message
 ```
+
+## Troubleshooting Network Issues
+
+If the backup script is causing network issues:
+
+1. **Reduce bandwidth limits**:
+   - Use a lower global limit: `./lan_backup.sh --bwlimit=2048` (2 MB/s)
+   - Set host-specific limits in the config file
+
+2. **Use the gentle backup strategy**:
+   - Set `backup_strategy: gentle` in your host configuration
+   - This minimizes network impact while still ensuring files are backed up
+
+3. **Add delays between hosts**:
+   - Use `--sleep=60` to wait 60 seconds between backing up different hosts
+   - This prevents network saturation from multiple concurrent transfers
+
+4. **Schedule backups during off-hours**:
+   - Use cron to run backups when network usage is low
 
 ## Requirements
 

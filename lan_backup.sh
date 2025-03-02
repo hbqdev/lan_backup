@@ -9,10 +9,14 @@ LOGS_DIR="${SCRIPT_DIR}/logs"
 
 # Default bandwidth limit in KB/s (5 MB/s = 5120 KB/s)
 # Set to 0 for unlimited
-DEFAULT_BANDWIDTH_LIMIT=20000
+DEFAULT_BANDWIDTH_LIMIT=5120
+
+# Default sleep time between hosts in seconds (0 = no sleep)
+DEFAULT_SLEEP_BETWEEN_HOSTS=30
 
 # Parse command line arguments
 BANDWIDTH_LIMIT=$DEFAULT_BANDWIDTH_LIMIT
+SLEEP_BETWEEN_HOSTS=$DEFAULT_SLEEP_BETWEEN_HOSTS
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --bwlimit|--bandwidth-limit)
@@ -25,23 +29,37 @@ while [[ "$#" -gt 0 ]]; do
         --unlimited)
             BANDWIDTH_LIMIT=0
             ;;
+        --sleep)
+            SLEEP_BETWEEN_HOSTS="$2"
+            shift
+            ;;
+        --sleep=*)
+            SLEEP_BETWEEN_HOSTS="${1#*=}"
+            ;;
+        --no-sleep)
+            SLEEP_BETWEEN_HOSTS=0
+            ;;
         --help)
             echo "Usage: $0 [options]"
             echo "Options:"
             echo "  --bwlimit, --bandwidth-limit VALUE  Set bandwidth limit in KB/s (default: $DEFAULT_BANDWIDTH_LIMIT)"
             echo "  --unlimited                         Run without bandwidth limits"
+            echo "  --sleep, --sleep=VALUE             Set sleep time between hosts in seconds (default: $DEFAULT_SLEEP_BETWEEN_HOSTS)"
+            echo "  --no-sleep                         Don't sleep between hosts"
             echo "  --help                              Show this help message"
             echo
             echo "Backup Strategies (configurable per host in backup_config.yaml):"
             echo "  mirror       - Creates an exact copy, deleting files at destination that don't exist at source"
             echo "  incremental  - Keeps previous versions in snapshots directory (default)"
             echo "  safe         - Only adds or updates files, never deletes"
+            echo "  gentle       - Network-friendly strategy that minimizes bandwidth usage"
             echo
             echo "Example configuration in backup_config.yaml:"
             echo "  hosts:"
             echo "    - name: server1"
             echo "      backup_strategy: incremental"
             echo "      max_snapshots: 7"
+            echo "      bandwidth_limit: 3072  # 3 MB/s"
             exit 0
             ;;
         *)
@@ -76,10 +94,11 @@ hosts:
     # Optional: Set bandwidth limit in KB/s for this host (overrides global setting)
     # bandwidth_limit: 2048
     
-    # Optional: Backup strategy (mirror, incremental, safe)
+    # Optional: Backup strategy (mirror, incremental, safe, gentle)
     # - mirror: Creates an exact copy, deleting files at destination that don't exist at source
     # - incremental: Keeps previous versions in snapshots directory (default)
     # - safe: Only adds or updates files, never deletes
+    # - gentle: Network-friendly strategy that minimizes bandwidth usage
     # backup_strategy: incremental
     
     # Optional: Maximum number of snapshots to keep (for incremental strategy)
@@ -498,9 +517,10 @@ install_yq() {
                 # Define backup strategies with clear purposes
                 declare -A backup_strategies
                 backup_strategies=(
-                    ["mirror"]="--archive --hard-links --acls --xattrs --delete --delete-excluded --progress --stats --timeout=120"
-                    ["incremental"]="--archive --hard-links --acls --xattrs --backup --backup-dir=\"$(realpath "$dest_path")/../.snapshots/$(date +%Y-%m-%d_%H-%M-%S)\" --progress --stats --timeout=120"
-                    ["safe"]="--archive --hard-links --acls --xattrs --update --progress --stats --timeout=120"
+                    ["mirror"]="--archive --hard-links --acls --xattrs --delete --delete-excluded --progress --stats --timeout=120 --no-compress"
+                    ["incremental"]="--archive --hard-links --acls --xattrs --backup --backup-dir=\"$(realpath "$dest_path")/../.snapshots/$(date +%Y-%m-%d_%H-%M-%S)\" --progress --stats --timeout=120 --no-compress"
+                    ["safe"]="--archive --hard-links --acls --xattrs --update --progress --stats --timeout=120 --no-compress"
+                    ["gentle"]="--archive --update --no-compress --timeout=120 --contimeout=60 --inplace --size-only --progress --stats"
                 )
                 
                 # Default strategy (can be overridden in config)
@@ -613,6 +633,10 @@ install_yq() {
                 ls -la "$dest_path"
                 echo "  Note: Some files may have been skipped due to permissions or other issues"
             done
+            if [ "$SLEEP_BETWEEN_HOSTS" -gt 0 ]; then
+                echo "Sleeping for $SLEEP_BETWEEN_HOSTS seconds before next host..."
+                sleep "$SLEEP_BETWEEN_HOSTS"
+            fi
         done
     else
         # For older yq versions (Python version)
@@ -721,9 +745,10 @@ install_yq() {
                 # Define backup strategies with clear purposes
                 declare -A backup_strategies
                 backup_strategies=(
-                    ["mirror"]="--archive --hard-links --acls --xattrs --delete --delete-excluded --progress --stats --timeout=120"
-                    ["incremental"]="--archive --hard-links --acls --xattrs --backup --backup-dir=\"$(realpath "$dest_path")/../.snapshots/$(date +%Y-%m-%d_%H-%M-%S)\" --progress --stats --timeout=120"
-                    ["safe"]="--archive --hard-links --acls --xattrs --update --progress --stats --timeout=120"
+                    ["mirror"]="--archive --hard-links --acls --xattrs --delete --delete-excluded --progress --stats --timeout=120 --no-compress"
+                    ["incremental"]="--archive --hard-links --acls --xattrs --backup --backup-dir=\"$(realpath "$dest_path")/../.snapshots/$(date +%Y-%m-%d_%H-%M-%S)\" --progress --stats --timeout=120 --no-compress"
+                    ["safe"]="--archive --hard-links --acls --xattrs --update --progress --stats --timeout=120 --no-compress"
+                    ["gentle"]="--archive --update --no-compress --timeout=120 --contimeout=60 --inplace --size-only --progress --stats"
                 )
                 
                 # Default strategy (can be overridden in config)
@@ -836,6 +861,10 @@ install_yq() {
                 ls -la "$dest_path"
                 echo "  Note: Some files may have been skipped due to permissions or other issues"
             done
+            if [ "$SLEEP_BETWEEN_HOSTS" -gt 0 ]; then
+                echo "Sleeping for $SLEEP_BETWEEN_HOSTS seconds before next host..."
+                sleep "$SLEEP_BETWEEN_HOSTS"
+            fi
         done
     fi
     
@@ -847,4 +876,5 @@ ln -sf "$LOG_FILE" "${LOGS_DIR}/latest_backup.log"
 
 echo "Log file created at: $LOG_FILE"
 echo "Bandwidth limit used: $([ "$BANDWIDTH_LIMIT" -eq 0 ] && echo "Unlimited" || echo "$BANDWIDTH_LIMIT KB/s")"
+echo "Sleep between hosts: $([ "$SLEEP_BETWEEN_HOSTS" -eq 0 ] && echo "None" || echo "$SLEEP_BETWEEN_HOSTS seconds")"
 
