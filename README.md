@@ -6,7 +6,7 @@ A simple, secure system for backing up data from multiple hosts on a local netwo
 
 - 🖥️ Backs up multiple hosts and paths
 - 🌐 Supports both hostname and IP-based connections
-- 🔄 Multiple backup strategies (mirror, incremental, safe, gentle)
+- 🔄 Multiple backup strategies (mirror, incremental, safe, gentle, large-files, large-incremental, root-access)
 - 📸 Incremental backups with configurable snapshot retention
 - 🔍 Automatically detects and adapts to different YQ versions
 - 📦 Automatically installs rsync on remote hosts if missing
@@ -18,6 +18,9 @@ A simple, secure system for backing up data from multiple hosts on a local netwo
 - 🚫 File exclusion patterns support
 - 📊 Detailed logging with statistics reporting
 - 🛡️ Automatic fallback to safer strategies if preferred strategy fails
+- 🔐 Support for backing up root-owned files with sudo
+- 🧪 Automatic testing of sudo access before backup
+- 🔄 Graceful degradation if sudo access is unavailable
 
 ## 🚀 Setup
 
@@ -37,14 +40,14 @@ The backup system is now completely self-contained in a single script. To get st
 
 ## 🔄 Backup Strategies
 
-The script supports four different backup strategies that can be configured per host:
+The script supports seven different backup strategies that can be configured per host:
 
 1. **Mirror** (`mirror`):
    - 🪞 Creates an exact copy of the source at the destination
    - 🗑️ Deletes files at the destination that don't exist at the source
    - ✅ Perfect for when you need an exact replica of the source
 
-2. **Incremental** (`incremental`) - Default:
+2. **Incremental** (`incremental`):
    - 📸 Preserves previous versions of files in a snapshots directory
    - 🔄 Automatically manages snapshots with configurable retention
    - ✅ Ideal for most backup scenarios where you want to recover previous versions
@@ -57,6 +60,21 @@ The script supports four different backup strategies that can be configured per 
    - 🌐 Network-friendly strategy that minimizes bandwidth usage
    - 🔄 Uses size-only comparison and in-place updates to reduce network traffic
    - ✅ Best for unstable networks or when backing up over slow connections
+
+5. **Large Files** (`large-files`):
+   - 📦 Optimized for transferring large files
+   - 🚀 Uses whole-file transfer to avoid delta calculations
+   - ✅ Best for media files, virtual machine images, and other large binary files
+
+6. **Large Incremental** (`large-incremental`) - Default:
+   - 📦 Combines large file optimization with incremental backup features
+   - 📸 Preserves previous versions while optimizing for large file transfers
+   - ✅ Ideal for backing up mixed content with both large and small files
+
+7. **Root Access** (`root-access`):
+   - 🔐 Automatically used when root-owned files are detected
+   - 🛡️ Preserves ownership and permissions of system files
+   - ✅ Perfect for backing up system directories or mixed-ownership content
 
 ## ⚙️ Configuration
 
@@ -75,8 +93,8 @@ hosts:
     # Optional: Set bandwidth limit in KB/s for this host (overrides global setting)
     # bandwidth_limit: 2048
     
-    # Optional: Backup strategy (mirror, incremental, safe, gentle)
-    # backup_strategy: incremental
+    # Optional: Backup strategy (mirror, incremental, safe, gentle, large-files, large-incremental, root-access)
+    # backup_strategy: large-incremental
     
     # Optional: Maximum number of snapshots to keep (for incremental strategy)
     # max_snapshots: 7
@@ -126,6 +144,26 @@ If the backup script is causing network issues:
 4. **🕒 Schedule backups during off-hours**:
    - Use cron to run backups when network usage is low
 
+## 🔐 Root-Owned Files
+
+The script now automatically handles root-owned files:
+
+1. **🔍 Automatic Detection**:
+   - The script checks for root-owned files in each backup path
+   - If found, it attempts to use sudo for the backup
+
+2. **🧪 Testing Before Backup**:
+   - Tests sudo access before attempting the backup
+   - Creates a temporary helper script on the remote server
+
+3. **🛡️ Fallback Mechanisms**:
+   - If sudo access fails, falls back to non-sudo backup
+   - Ensures you get at least a partial backup of non-root files
+
+4. **📝 Detailed Logging**:
+   - Provides verbose output about sudo access attempts
+   - Reports which files might be skipped due to permission issues
+
 ## 📋 Requirements
 
 - `sshpass` for password-based SSH authentication
@@ -137,9 +175,24 @@ If the backup script is causing network issues:
 
 ## ❓ Troubleshooting
 
-If you encounter rsync compression issues, try one of these solutions:
-1. Disable compression by removing the `-z` flag from the rsync command
-2. Use SSH compression instead by adding `-C` to the SSH options
+If you encounter issues with the backup:
+
+1. **🔄 Rsync Compression Issues**:
+   - The script now disables compression by default with `--no-compress`
+   - This improves performance and compatibility
+
+2. **🔐 Sudo Access Problems**:
+   - Check if your user has sudo access on the remote system
+   - Verify that the password works with sudo commands
+   - The script will attempt multiple sudo approaches automatically
+
+3. **📊 Check Logs for Details**:
+   - Review the detailed logs in the `logs` directory
+   - The script provides verbose output about what it's doing
+
+4. **🔄 Block Size Optimization**:
+   - The script uses a 128K block size for optimal performance
+   - This can be adjusted in the script if needed for specific environments
 
 ## 📄 License
 
