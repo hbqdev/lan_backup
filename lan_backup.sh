@@ -131,61 +131,133 @@ install_rsync() {
     fi
 }
 
-# Function to install yq
+# Function to install yq and its dependencies
 install_yq() {
     echo "🔧 Attempting to install yq..."
     
     # Check for package managers and install yq
     if command -v apt-get &>/dev/null; then
-        echo "📦 Debian/Ubuntu detected. Installing yq using apt-get..."
-        sudo apt-get update && sudo apt-get install -y yq || {
+        echo "📦 Debian/Ubuntu detected. Installing yq and dependencies..."
+        # First try to install jq (dependency for Python yq)
+        sudo apt-get update && sudo apt-get install -y jq || {
+            echo "❌ Failed to install jq with sudo. Trying without sudo..."
+            apt-get update && apt-get install -y jq
+        }
+        
+        # Then try to install yq
+        sudo apt-get install -y yq || {
             echo "❌ Failed to install yq with apt-get. Trying alternative method..."
             # Try to install Go version
-            if command -v wget &>/dev/null && command -v sudo &>/dev/null; then
+            if command -v wget &>/dev/null; then
                 echo "📦 Installing yq using wget and direct binary..."
                 YQ_VERSION="v4.35.1"
                 YQ_BINARY="yq_linux_amd64"
                 wget -q "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${YQ_BINARY}" -O /tmp/yq && \
                 sudo mv /tmp/yq /usr/local/bin/yq && \
-                sudo chmod +x /usr/local/bin/yq
+                sudo chmod +x /usr/local/bin/yq || {
+                    echo "❌ Failed to install Go yq with sudo. Trying without sudo..."
+                    wget -q "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${YQ_BINARY}" -O /tmp/yq && \
+                    mv /tmp/yq ~/yq && \
+                    chmod +x ~/yq && \
+                    export PATH=$PATH:~
+                }
             fi
         }
     elif command -v yum &>/dev/null; then
-        echo "📦 RHEL/CentOS/Fedora detected. Installing yq using yum..."
-        sudo yum install -y wget && {
-            echo "📦 Installing yq using wget and direct binary..."
-            YQ_VERSION="v4.35.1"
-            YQ_BINARY="yq_linux_amd64"
+        echo "📦 RHEL/CentOS/Fedora detected. Installing dependencies..."
+        # Install jq first
+        sudo yum install -y jq wget || {
+            echo "❌ Failed to install jq with sudo. Trying without sudo..."
+            yum install -y jq wget
+        }
+        
+        # Then install yq (Go version)
+        echo "📦 Installing yq using wget and direct binary..."
+        YQ_VERSION="v4.35.1"
+        YQ_BINARY="yq_linux_amd64"
+        wget -q "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${YQ_BINARY}" -O /tmp/yq && \
+        sudo mv /tmp/yq /usr/local/bin/yq && \
+        sudo chmod +x /usr/local/bin/yq || {
+            echo "❌ Failed to install Go yq with sudo. Trying without sudo..."
             wget -q "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${YQ_BINARY}" -O /tmp/yq && \
-            sudo mv /tmp/yq /usr/local/bin/yq && \
-            sudo chmod +x /usr/local/bin/yq
+            mv /tmp/yq ~/yq && \
+            chmod +x ~/yq && \
+            export PATH=$PATH:~
         }
     elif command -v dnf &>/dev/null; then
-        echo "📦 Fedora/RHEL detected. Installing yq using dnf..."
-        sudo dnf install -y wget && {
+        echo "📦 Fedora/RHEL detected. Installing dependencies..."
+        # Install jq first
+        sudo dnf install -y jq wget || {
+            echo "❌ Failed to install jq with sudo. Trying without sudo..."
+            dnf install -y jq wget
+        }
+        
+        # Then install yq (Go version)
+        echo "📦 Installing yq using wget and direct binary..."
+        YQ_VERSION="v4.35.1"
+        YQ_BINARY="yq_linux_amd64"
+        wget -q "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${YQ_BINARY}" -O /tmp/yq && \
+        sudo mv /tmp/yq /usr/local/bin/yq && \
+        sudo chmod +x /usr/local/bin/yq || {
+            echo "❌ Failed to install Go yq with sudo. Trying without sudo..."
+            wget -q "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${YQ_BINARY}" -O /tmp/yq && \
+            mv /tmp/yq ~/yq && \
+            chmod +x ~/yq && \
+            export PATH=$PATH:~
+        }
+    elif command -v pip &>/dev/null; then
+        echo "📦 Python pip detected. Installing dependencies..."
+        # Install jq first
+        if command -v apt-get &>/dev/null; then
+            sudo apt-get update && sudo apt-get install -y jq || apt-get update && apt-get install -y jq
+        elif command -v yum &>/dev/null; then
+            sudo yum install -y jq || yum install -y jq
+        elif command -v dnf &>/dev/null; then
+            sudo dnf install -y jq || dnf install -y jq
+        fi
+        
+        # Then install yq
+        pip install yq || sudo pip install yq
+    elif command -v pip3 &>/dev/null; then
+        echo "📦 Python pip3 detected. Installing dependencies..."
+        # Install jq first
+        if command -v apt-get &>/dev/null; then
+            sudo apt-get update && sudo apt-get install -y jq || apt-get update && apt-get install -y jq
+        elif command -v yum &>/dev/null; then
+            sudo yum install -y jq || yum install -y jq
+        elif command -v dnf &>/dev/null; then
+            sudo dnf install -y jq || dnf install -y jq
+        fi
+        
+        # Then install yq
+        pip3 install yq || sudo pip3 install yq
+    else
+        echo "❌ Could not detect a suitable package manager. Trying direct binary installation..."
+        # Try direct binary installation for yq
+        if command -v wget &>/dev/null; then
             echo "📦 Installing yq using wget and direct binary..."
             YQ_VERSION="v4.35.1"
             YQ_BINARY="yq_linux_amd64"
             wget -q "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${YQ_BINARY}" -O /tmp/yq && \
-            sudo mv /tmp/yq /usr/local/bin/yq && \
-            sudo chmod +x /usr/local/bin/yq
-        }
-    elif command -v pip &>/dev/null; then
-        echo "📦 Python pip detected. Installing yq using pip..."
-        pip install yq || sudo pip install yq
-    elif command -v pip3 &>/dev/null; then
-        echo "📦 Python pip3 detected. Installing yq using pip3..."
-        pip3 install yq || sudo pip3 install yq
-    else
-        echo "❌ Could not detect a suitable package manager. Please install yq manually:"
-        echo "   For Go version: https://github.com/mikefarah/yq#install"
-        echo "   For Python version: pip install yq"
-        return 1
+            chmod +x /tmp/yq && \
+            mv /tmp/yq ~/yq && \
+            export PATH=$PATH:~
+            echo "⚠️ Added yq to ~/yq. You may need to add this to your PATH permanently."
+        else
+            echo "❌ Failed to install yq. Please install it manually:"
+            echo "   For Go version: https://github.com/mikefarah/yq#install"
+            echo "   For Python version: pip install yq (requires jq)"
+            return 1
+        fi
     fi
     
     # Check if yq was installed successfully
     if command -v yq &>/dev/null; then
         echo "✅ yq installed successfully."
+        return 0
+    elif [ -f ~/yq ] && [ -x ~/yq ]; then
+        echo "✅ yq installed to ~/yq. Using this version."
+        alias yq=~/yq
         return 0
     else
         echo "❌ Failed to install yq."
@@ -212,6 +284,23 @@ install_yq() {
             echo "   For Go version: https://github.com/mikefarah/yq#install"
             echo "   For Python version: pip install yq"
             exit 1
+        fi
+    else
+        # Check if it's the Python version and if jq is installed
+        YQ_VERSION=$(yq --version 2>&1 | head -n 1)
+        if [[ "$YQ_VERSION" != *"mikefarah"* ]] && ! command -v jq &> /dev/null; then
+            echo "❌ Python yq detected but jq is not installed. Attempting to install jq..."
+            if command -v apt-get &>/dev/null; then
+                sudo apt-get update && sudo apt-get install -y jq || apt-get update && apt-get install -y jq
+            elif command -v yum &>/dev/null; then
+                sudo yum install -y jq || yum install -y jq
+            elif command -v dnf &>/dev/null; then
+                sudo dnf install -y jq || dnf install -y jq
+            else
+                echo "❌ Could not install jq. Please install it manually."
+                echo "   The Python version of yq requires jq to be installed."
+                exit 1
+            fi
         fi
     fi
     
