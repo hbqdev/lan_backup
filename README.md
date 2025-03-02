@@ -164,7 +164,7 @@ The script automatically handles root-owned files:
    - Provides verbose output about sudo access attempts
    - Reports which files might be skipped due to permission issues
 
-## 📋 Requirements
+## 📋 Requirements & Usage
 
 - `sshpass` for password-based SSH authentication
 - `yq` for YAML parsing (supports both Go and Python versions)
@@ -172,6 +172,8 @@ The script automatically handles root-owned files:
 - Passwords are stored in a separate `.env` file with restricted permissions
 - The `.env` file can be excluded from version control
 - Configuration and secrets are properly separated
+
+The script will setup all of the above in the first run. Then afterwards you just need to edit the config file and the .env file for the backup to run.
 
 ## ❓ Troubleshooting
 
