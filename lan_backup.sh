@@ -487,9 +487,16 @@ install_yq() {
                         rsync_opts="$rsync_opts --bwlimit=$host_bandwidth_limit"
                     fi
                     
+                    # Make sure destination directory exists and is accessible
+                    mkdir -p "$dest_path"
+                    
+                    # Change to script directory to avoid getcwd errors
+                    cd "$SCRIPT_DIR"
+                    
+                    # Use absolute paths for both source and destination
                     if rsync $rsync_opts \
                         --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
-                        "$user@$host_to_use:$path/" "$dest_path/"; then
+                        "$user@$host_to_use:$path/" "$(realpath "$dest_path")/"; then
                         echo "  ✅ Rsync successful with $rsync_mode options."
                         break
                     else
@@ -626,9 +633,16 @@ install_yq() {
                         rsync_opts="$rsync_opts --bwlimit=$host_bandwidth_limit"
                     fi
                     
+                    # Make sure destination directory exists and is accessible
+                    mkdir -p "$dest_path"
+                    
+                    # Change to script directory to avoid getcwd errors
+                    cd "$SCRIPT_DIR"
+                    
+                    # Use absolute paths for both source and destination
                     if rsync $rsync_opts \
                         --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
-                        "$user@$host_to_use:$path/" "$dest_path/"; then
+                        "$user@$host_to_use:$path/" "$(realpath "$dest_path")/"; then
                         echo "  ✅ Rsync successful with $rsync_mode options."
                         break
                     else
