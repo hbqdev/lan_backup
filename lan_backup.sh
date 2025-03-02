@@ -524,12 +524,13 @@ install_yq() {
                     ["incremental"]="--archive --hard-links --acls --xattrs --backup --backup-dir=\"$(realpath "$dest_path")/../.snapshots/$(date +%Y-%m-%d_%H-%M-%S)\" --progress --stats --timeout=120 --no-compress --block-size=128K"
                     ["safe"]="--archive --hard-links --acls --xattrs --update --progress --stats --timeout=120 --no-compress --block-size=128K"
                     ["gentle"]="--archive --update --no-compress --timeout=120 --contimeout=60 --inplace --size-only --progress --stats --block-size=128K"
-                    ["large-files"]="--archive --whole-file --block-size=128K --info=progress2 --no-inc-recursive --timeout=120 --no-compress"
-                    ["large-incremental"]="--archive --whole-file --block-size=128K --hard-links --acls --xattrs --backup --backup-dir=\"$(realpath "$dest_path")/../.snapshots/$(date +%Y-%m-%d_%H-%M-%S)\" --info=progress2 --no-inc-recursive --timeout=180 --no-compress"
+                    ["large-files"]="--archive --whole-file --block-size=128K --info=progress2 --timeout=120 --no-compress"
+                    ["large-incremental"]="--archive --whole-file --block-size=128K --hard-links --acls --xattrs --backup --backup-dir=\"$(realpath "$dest_path")/../.snapshots/$(date +%Y-%m-%d_%H-%M-%S)\" --info=progress2 --timeout=180 --no-compress"
+                    ["root-access"]="--archive --whole-file --block-size=128K --hard-links --acls --xattrs --super --numeric-ids --info=progress2 --timeout=180 --no-compress"
                 )
                 
                 # Default strategy (can be overridden in config)
-                backup_strategy="incremental"
+                backup_strategy="large-incremental"
                 
                 # Try to get host-specific backup strategy
                 host_backup_strategy=$(yq ".hosts[$i].backup_strategy" "$CONFIG_FILE" 2>/dev/null)
@@ -595,7 +596,91 @@ install_yq() {
                 
                 # Use absolute paths for both source and destination
                 echo "  Starting backup with $backup_strategy strategy..."
-                rsync_command="rsync $rsync_opts $exclusion_opts --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+                
+                # Check if we need to use sudo for root-owned files
+                use_sudo=false
+                if sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host_to_use" "find $path -maxdepth 1 -user root | grep -q ." &>/dev/null; then
+                    echo "  🔒 Root-owned files detected, attempting to use sudo..."
+                    if sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host_to_use" "sudo -n true" &>/dev/null; then
+                        echo "  ✅ Sudo access available without password, using sudo for backup"
+                        use_sudo=true
+                    elif sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host_to_use" "echo \"$password_var\" | sudo -S true" &>/dev/null; then
+                        echo "  ✅ Sudo access available with password, using sudo for backup"
+                        use_sudo=true
+                    else
+                        echo "  ⚠️ Root-owned files detected but sudo access not available"
+                        echo "  ⚠️ Some files may not be backed up due to permission issues"
+                    fi
+                fi
+                
+                # Modify rsync command to use sudo if needed
+                if [ "$use_sudo" = true ]; then
+                    # Use the root-access strategy or add --super to current strategy
+                    if [[ "$backup_strategy" == "incremental" || "$backup_strategy" == "large-incremental" ]]; then
+                        # For incremental strategies, add sudo but keep the backup directory
+                        rsync_opts="$rsync_opts --super --numeric-ids"
+                    else
+                        # For other strategies, switch to root-access
+                        backup_strategy="root-access"
+                        rsync_opts="${backup_strategies[$backup_strategy]} --human-readable --partial --info=progress2 --no-inc-recursive"
+                        
+                        # Add bandwidth limit if set
+                        if [ "$host_bandwidth_limit" -gt 0 ]; then
+                            rsync_opts="$rsync_opts --bwlimit=$host_bandwidth_limit"
+                        fi
+                    fi
+                    
+                    # Create a temporary script on the remote server to run rsync with sudo
+                    echo "  Creating temporary script for sudo rsync..."
+                    tmp_script="/tmp/rsync_sudo_$RANDOM.sh"
+                    tmp_scripts=("$tmp_script")
+                    sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host_to_use" "cat > $tmp_script << 'EOF'
+#!/bin/bash
+# More verbose output for debugging
+echo \"Running sudo rsync with args: \$@\" >&2
+sudo rsync \"\$@\"
+exit_code=\$?
+echo \"Rsync completed with exit code: \$exit_code\" >&2
+exit \$exit_code
+EOF
+chmod +x $tmp_script"
+                    
+                    # Test the sudo rsync script with a simple command
+                    echo "  Testing sudo rsync script..."
+                    if ! sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no -v "$user@$host_to_use" "$tmp_script --version"; then
+                        echo "  ⚠️ Sudo rsync test failed. Trying alternative approach..."
+                        # Try a different approach - create a simpler script
+                        sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host_to_use" "cat > $tmp_script << 'EOF'
+#!/bin/bash
+echo \"$password_var\" | sudo -S rsync \"\$@\"
+EOF
+chmod +x $tmp_script"
+                        
+                        # Test the alternative script
+                        if ! sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no -v "$user@$host_to_use" "$tmp_script --version"; then
+                            echo "  ❌ Both sudo approaches failed. Will attempt backup without sudo."
+                            use_sudo=false
+                        else
+                            echo "  ✅ Alternative sudo approach works. Proceeding with backup."
+                        fi
+                    else
+                        echo "  ✅ Sudo rsync test successful. Proceeding with backup."
+                    fi
+                    
+                    if [ "$use_sudo" = true ]; then
+                        # Use the temporary script as the rsync server command with simplified options
+                        rsync_command="rsync --archive --update --verbose --stats --rsync-path=\"$tmp_script\" --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no -v\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+                        
+                        # Clean up after execution - will be updated if we create more scripts
+                        trap 'for script in "${tmp_scripts[@]}"; do sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host_to_use" "rm -f $script"; done' EXIT
+                    else
+                        # Standard rsync command without sudo
+                        rsync_command="rsync $rsync_opts $exclusion_opts --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+                    fi
+                else
+                    # Standard rsync command without sudo
+                    rsync_command="rsync $rsync_opts $exclusion_opts --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+                fi
                 
                 # Execute the rsync command
                 if eval "$rsync_command"; then
@@ -623,7 +708,18 @@ install_yq() {
                     echo "  ⚠️ Trying with safe strategy as fallback..."
                     
                     # Fallback to safe strategy if the chosen strategy fails
-                    rsync_command="rsync ${backup_strategies["safe"]} --human-readable --partial --info=progress2 $exclusion_opts --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+                    if [ "$use_sudo" = true ]; then
+                        # Use safe strategy with sudo and more verbose options
+                        echo "  Using safe strategy with sudo as fallback..."
+                        
+                        # Reuse the existing tmp_script that was already tested
+                        # Use the temporary script with simpler options
+                        rsync_command="rsync --archive --update --super --numeric-ids --verbose --stats --rsync-path=\"$tmp_script\" --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no -v\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+                    else
+                        # Standard safe strategy without sudo - simplified options
+                        echo "  Using standard safe strategy as fallback..."
+                        rsync_command="rsync --archive --update --verbose --stats --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no -v\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+                    fi
                     
                     if eval "$rsync_command"; then
                         echo "  ✅ Backup successful with safe fallback strategy."
@@ -756,8 +852,9 @@ install_yq() {
                     ["incremental"]="--archive --hard-links --acls --xattrs --backup --backup-dir=\"$(realpath "$dest_path")/../.snapshots/$(date +%Y-%m-%d_%H-%M-%S)\" --progress --stats --timeout=120 --no-compress --block-size=128K"
                     ["safe"]="--archive --hard-links --acls --xattrs --update --progress --stats --timeout=120 --no-compress --block-size=128K"
                     ["gentle"]="--archive --update --no-compress --timeout=120 --contimeout=60 --inplace --size-only --progress --stats --block-size=128K"
-                    ["large-files"]="--archive --whole-file --block-size=128K --info=progress2 --no-inc-recursive --timeout=120 --no-compress"
-                    ["large-incremental"]="--archive --whole-file --block-size=128K --hard-links --acls --xattrs --backup --backup-dir=\"$(realpath "$dest_path")/../.snapshots/$(date +%Y-%m-%d_%H-%M-%S)\" --info=progress2 --no-inc-recursive --timeout=180 --no-compress"
+                    ["large-files"]="--archive --whole-file --block-size=128K --info=progress2 --timeout=120 --no-compress"
+                    ["large-incremental"]="--archive --whole-file --block-size=128K --hard-links --acls --xattrs --backup --backup-dir=\"$(realpath "$dest_path")/../.snapshots/$(date +%Y-%m-%d_%H-%M-%S)\" --info=progress2 --timeout=180 --no-compress"
+                    ["root-access"]="--archive --whole-file --block-size=128K --hard-links --acls --xattrs --super --numeric-ids --info=progress2 --timeout=180 --no-compress"
                 )
                 
                 # Default strategy (can be overridden in config)
@@ -827,7 +924,91 @@ install_yq() {
                 
                 # Use absolute paths for both source and destination
                 echo "  Starting backup with $backup_strategy strategy..."
-                rsync_command="rsync $rsync_opts $exclusion_opts --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+                
+                # Check if we need to use sudo for root-owned files
+                use_sudo=false
+                if sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host_to_use" "find $path -maxdepth 1 -user root | grep -q ." &>/dev/null; then
+                    echo "  🔒 Root-owned files detected, attempting to use sudo..."
+                    if sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host_to_use" "sudo -n true" &>/dev/null; then
+                        echo "  ✅ Sudo access available without password, using sudo for backup"
+                        use_sudo=true
+                    elif sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host_to_use" "echo \"$password_var\" | sudo -S true" &>/dev/null; then
+                        echo "  ✅ Sudo access available with password, using sudo for backup"
+                        use_sudo=true
+                    else
+                        echo "  ⚠️ Root-owned files detected but sudo access not available"
+                        echo "  ⚠️ Some files may not be backed up due to permission issues"
+                    fi
+                fi
+                
+                # Modify rsync command to use sudo if needed
+                if [ "$use_sudo" = true ]; then
+                    # Use the root-access strategy or add --super to current strategy
+                    if [[ "$backup_strategy" == "incremental" || "$backup_strategy" == "large-incremental" ]]; then
+                        # For incremental strategies, add sudo but keep the backup directory
+                        rsync_opts="$rsync_opts --super --numeric-ids"
+                    else
+                        # For other strategies, switch to root-access
+                        backup_strategy="root-access"
+                        rsync_opts="${backup_strategies[$backup_strategy]} --human-readable --partial --info=progress2 --no-inc-recursive"
+                        
+                        # Add bandwidth limit if set
+                        if [ "$host_bandwidth_limit" -gt 0 ]; then
+                            rsync_opts="$rsync_opts --bwlimit=$host_bandwidth_limit"
+                        fi
+                    fi
+                    
+                    # Create a temporary script on the remote server to run rsync with sudo
+                    echo "  Creating temporary script for sudo rsync..."
+                    tmp_script="/tmp/rsync_sudo_$RANDOM.sh"
+                    tmp_scripts=("$tmp_script")
+                    sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host_to_use" "cat > $tmp_script << 'EOF'
+#!/bin/bash
+# More verbose output for debugging
+echo \"Running sudo rsync with args: \$@\" >&2
+sudo rsync \"\$@\"
+exit_code=\$?
+echo \"Rsync completed with exit code: \$exit_code\" >&2
+exit \$exit_code
+EOF
+chmod +x $tmp_script"
+                    
+                    # Test the sudo rsync script with a simple command
+                    echo "  Testing sudo rsync script..."
+                    if ! sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no -v "$user@$host_to_use" "$tmp_script --version"; then
+                        echo "  ⚠️ Sudo rsync test failed. Trying alternative approach..."
+                        # Try a different approach - create a simpler script
+                        sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host_to_use" "cat > $tmp_script << 'EOF'
+#!/bin/bash
+echo \"$password_var\" | sudo -S rsync \"\$@\"
+EOF
+chmod +x $tmp_script"
+                        
+                        # Test the alternative script
+                        if ! sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no -v "$user@$host_to_use" "$tmp_script --version"; then
+                            echo "  ❌ Both sudo approaches failed. Will attempt backup without sudo."
+                            use_sudo=false
+                        else
+                            echo "  ✅ Alternative sudo approach works. Proceeding with backup."
+                        fi
+                    else
+                        echo "  ✅ Sudo rsync test successful. Proceeding with backup."
+                    fi
+                    
+                    if [ "$use_sudo" = true ]; then
+                        # Use the temporary script as the rsync server command with simplified options
+                        rsync_command="rsync --archive --update --verbose --stats --rsync-path=\"$tmp_script\" --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no -v\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+                        
+                        # Clean up after execution - will be updated if we create more scripts
+                        trap 'for script in "${tmp_scripts[@]}"; do sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host_to_use" "rm -f $script"; done' EXIT
+                    else
+                        # Standard rsync command without sudo
+                        rsync_command="rsync $rsync_opts $exclusion_opts --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+                    fi
+                else
+                    # Standard rsync command without sudo
+                    rsync_command="rsync $rsync_opts $exclusion_opts --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+                fi
                 
                 # Execute the rsync command
                 if eval "$rsync_command"; then
@@ -855,7 +1036,18 @@ install_yq() {
                     echo "  ⚠️ Trying with safe strategy as fallback..."
                     
                     # Fallback to safe strategy if the chosen strategy fails
-                    rsync_command="rsync ${backup_strategies["safe"]} --human-readable --partial --info=progress2 $exclusion_opts --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+                    if [ "$use_sudo" = true ]; then
+                        # Use safe strategy with sudo and more verbose options
+                        echo "  Using safe strategy with sudo as fallback..."
+                        
+                        # Reuse the existing tmp_script that was already tested
+                        # Use the temporary script with simpler options
+                        rsync_command="rsync --archive --update --super --numeric-ids --verbose --stats --rsync-path=\"$tmp_script\" --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no -v\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+                    else
+                        # Standard safe strategy without sudo - simplified options
+                        echo "  Using standard safe strategy as fallback..."
+                        rsync_command="rsync --archive --update --verbose --stats --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no -v\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+                    fi
                     
                     if eval "$rsync_command"; then
                         echo "  ✅ Backup successful with safe fallback strategy."
