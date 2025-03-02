@@ -9,7 +9,7 @@ LOGS_DIR="${SCRIPT_DIR}/logs"
 
 # Default bandwidth limit in KB/s (5 MB/s = 5120 KB/s)
 # Set to 0 for unlimited
-DEFAULT_BANDWIDTH_LIMIT=5120
+DEFAULT_BANDWIDTH_LIMIT=20000
 
 # Parse command line arguments
 BANDWIDTH_LIMIT=$DEFAULT_BANDWIDTH_LIMIT
