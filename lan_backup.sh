@@ -1,11 +1,46 @@
 #!/bin/bash
-# Backup Script v4.3 (With auto rsync installation and improved logging)
+# Backup Script v4.4 (With auto rsync installation, improved logging, and bandwidth control)
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 CONFIG_FILE="${SCRIPT_DIR}/configs/backup_config.yaml"
 ENV_FILE="${SCRIPT_DIR}/configs/.env"
 BACKUP_ROOT="${SCRIPT_DIR}/data"
 LOGS_DIR="${SCRIPT_DIR}/logs"
+
+# Default bandwidth limit in KB/s (5 MB/s = 5120 KB/s)
+# Set to 0 for unlimited
+DEFAULT_BANDWIDTH_LIMIT=5120
+
+# Parse command line arguments
+BANDWIDTH_LIMIT=$DEFAULT_BANDWIDTH_LIMIT
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --bwlimit|--bandwidth-limit)
+            BANDWIDTH_LIMIT="$2"
+            shift
+            ;;
+        --bwlimit=*|--bandwidth-limit=*)
+            BANDWIDTH_LIMIT="${1#*=}"
+            ;;
+        --unlimited)
+            BANDWIDTH_LIMIT=0
+            ;;
+        --help)
+            echo "Usage: $0 [options]"
+            echo "Options:"
+            echo "  --bwlimit, --bandwidth-limit VALUE  Set bandwidth limit in KB/s (default: $DEFAULT_BANDWIDTH_LIMIT)"
+            echo "  --unlimited                         Run without bandwidth limits"
+            echo "  --help                              Show this help message"
+            exit 0
+            ;;
+        *)
+            echo "Unknown parameter: $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+    shift
+done
 
 # Create directory structure if it doesn't exist
 mkdir -p "${SCRIPT_DIR}/"{data,logs,configs}
@@ -27,6 +62,8 @@ hosts:
     password_key: EXAMPLE_HOST_PASSWORD  # Reference to environment variable
     paths:
       - /path/to/backup
+    # Optional: Set bandwidth limit in KB/s for this host (overrides global setting)
+    # bandwidth_limit: 2048
 
   # Add more hosts as needed
 EOF
@@ -422,6 +459,12 @@ install_yq() {
                     echo "  ✅ rsync is already installed on remote host."
                 fi
                 
+                # Try to get host-specific bandwidth limit
+                host_bandwidth_limit=$(yq ".hosts[$i].bandwidth_limit" "$CONFIG_FILE")
+                if [[ "$host_bandwidth_limit" == "null" || -z "$host_bandwidth_limit" ]]; then
+                    host_bandwidth_limit=$BANDWIDTH_LIMIT
+                fi
+                
                 # Try rsync with different options in sequence
                 for rsync_mode in "standard" "alternative" "minimal"; do
                     echo "  Trying rsync with $rsync_mode options..."
@@ -437,6 +480,12 @@ install_yq() {
                             rsync_opts="-rlptDv --progress --force --ignore-errors --timeout=60"
                             ;;
                     esac
+                    
+                    # Add bandwidth limit if set
+                    if [ "$host_bandwidth_limit" -gt 0 ]; then
+                        echo "  Applying bandwidth limit: $host_bandwidth_limit KB/s"
+                        rsync_opts="$rsync_opts --bwlimit=$host_bandwidth_limit"
+                    fi
                     
                     if rsync $rsync_opts \
                         --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
@@ -549,6 +598,12 @@ install_yq() {
                     echo "  ✅ rsync is already installed on remote host."
                 fi
                 
+                # Try to get host-specific bandwidth limit
+                host_bandwidth_limit=$(yq -r ".hosts[$i].bandwidth_limit" "$CONFIG_FILE")
+                if [[ "$host_bandwidth_limit" == "null" || -z "$host_bandwidth_limit" ]]; then
+                    host_bandwidth_limit=$BANDWIDTH_LIMIT
+                fi
+                
                 # Try rsync with different options in sequence
                 for rsync_mode in "standard" "alternative" "minimal"; do
                     echo "  Trying rsync with $rsync_mode options..."
@@ -564,6 +619,12 @@ install_yq() {
                             rsync_opts="-rlptDv --progress --force --ignore-errors --timeout=60"
                             ;;
                     esac
+                    
+                    # Add bandwidth limit if set
+                    if [ "$host_bandwidth_limit" -gt 0 ]; then
+                        echo "  Applying bandwidth limit: $host_bandwidth_limit KB/s"
+                        rsync_opts="$rsync_opts --bwlimit=$host_bandwidth_limit"
+                    fi
                     
                     if rsync $rsync_opts \
                         --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
@@ -591,4 +652,5 @@ install_yq() {
 ln -sf "$LOG_FILE" "${LOGS_DIR}/latest_backup.log"
 
 echo "Log file created at: $LOG_FILE"
+echo "Bandwidth limit used: $([ "$BANDWIDTH_LIMIT" -eq 0 ] && echo "Unlimited" || echo "$BANDWIDTH_LIMIT KB/s")"
 
