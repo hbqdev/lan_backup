@@ -164,7 +164,7 @@ The script automatically handles root-owned files:
    - Provides verbose output about sudo access attempts
    - Reports which files might be skipped due to permission issues
 
-## 📋 Requirements & Usage
+## 📋 Requirements
 
 - `sshpass` for password-based SSH authentication
 - `yq` for YAML parsing (supports both Go and Python versions)
