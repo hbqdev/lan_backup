@@ -241,12 +241,12 @@ install_rsync() {
                     echo "  Starting forced rsync..."
                     
                     # Try with hostname first - added force options
-                    rsync -avz --progress --force --ignore-errors --delete \
+                    rsync -av --progress --force --ignore-errors --delete \
                         --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
                         "$user@$hostname:$path/" "$dest_path/" || {
                         echo "  Rsync with hostname failed, trying with IP..."
                         # If hostname fails, try with IP
-                        rsync -avz --progress --force --ignore-errors --delete \
+                        rsync -av --progress --force --ignore-errors --delete \
                             --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
                             "$user@$ip:$path/" "$dest_path/"
                     }
@@ -347,12 +347,12 @@ install_rsync() {
                     echo "  Starting forced rsync..."
                     
                     # Try with hostname first - added force options
-                    rsync -avz --progress --force --ignore-errors --delete \
+                    rsync -av --progress --force --ignore-errors --delete \
                         --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
                         "$user@$hostname:$path/" "$dest_path/" || {
                         echo "  Rsync with hostname failed, trying with IP..."
                         # If hostname fails, try with IP
-                        rsync -avz --progress --force --ignore-errors --delete \
+                        rsync -av --progress --force --ignore-errors --delete \
                             --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
                             "$user@$ip:$path/" "$dest_path/"
                     }
