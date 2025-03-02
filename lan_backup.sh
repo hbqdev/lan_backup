@@ -131,6 +131,68 @@ install_rsync() {
     fi
 }
 
+# Function to install yq
+install_yq() {
+    echo "🔧 Attempting to install yq..."
+    
+    # Check for package managers and install yq
+    if command -v apt-get &>/dev/null; then
+        echo "📦 Debian/Ubuntu detected. Installing yq using apt-get..."
+        sudo apt-get update && sudo apt-get install -y yq || {
+            echo "❌ Failed to install yq with apt-get. Trying alternative method..."
+            # Try to install Go version
+            if command -v wget &>/dev/null && command -v sudo &>/dev/null; then
+                echo "📦 Installing yq using wget and direct binary..."
+                YQ_VERSION="v4.35.1"
+                YQ_BINARY="yq_linux_amd64"
+                wget -q "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${YQ_BINARY}" -O /tmp/yq && \
+                sudo mv /tmp/yq /usr/local/bin/yq && \
+                sudo chmod +x /usr/local/bin/yq
+            fi
+        }
+    elif command -v yum &>/dev/null; then
+        echo "📦 RHEL/CentOS/Fedora detected. Installing yq using yum..."
+        sudo yum install -y wget && {
+            echo "📦 Installing yq using wget and direct binary..."
+            YQ_VERSION="v4.35.1"
+            YQ_BINARY="yq_linux_amd64"
+            wget -q "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${YQ_BINARY}" -O /tmp/yq && \
+            sudo mv /tmp/yq /usr/local/bin/yq && \
+            sudo chmod +x /usr/local/bin/yq
+        }
+    elif command -v dnf &>/dev/null; then
+        echo "📦 Fedora/RHEL detected. Installing yq using dnf..."
+        sudo dnf install -y wget && {
+            echo "📦 Installing yq using wget and direct binary..."
+            YQ_VERSION="v4.35.1"
+            YQ_BINARY="yq_linux_amd64"
+            wget -q "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${YQ_BINARY}" -O /tmp/yq && \
+            sudo mv /tmp/yq /usr/local/bin/yq && \
+            sudo chmod +x /usr/local/bin/yq
+        }
+    elif command -v pip &>/dev/null; then
+        echo "📦 Python pip detected. Installing yq using pip..."
+        pip install yq || sudo pip install yq
+    elif command -v pip3 &>/dev/null; then
+        echo "📦 Python pip3 detected. Installing yq using pip3..."
+        pip3 install yq || sudo pip3 install yq
+    else
+        echo "❌ Could not detect a suitable package manager. Please install yq manually:"
+        echo "   For Go version: https://github.com/mikefarah/yq#install"
+        echo "   For Python version: pip install yq"
+        return 1
+    fi
+    
+    # Check if yq was installed successfully
+    if command -v yq &>/dev/null; then
+        echo "✅ yq installed successfully."
+        return 0
+    else
+        echo "❌ Failed to install yq."
+        return 1
+    fi
+}
+
 {
     echo "=== Backup Started @ $(date) ==="
     
@@ -142,10 +204,15 @@ install_rsync() {
     
     # Check which version of yq is installed
     if ! command -v yq &> /dev/null; then
-        echo "❌ ERROR: yq is not installed. Please install it first."
-        echo "   For Go version: https://github.com/mikefarah/yq#install"
-        echo "   For Python version: pip install yq"
-        exit 1
+        echo "❌ yq is not installed. Attempting to install it..."
+        if install_yq; then
+            echo "✅ yq installed successfully. Continuing with backup..."
+        else
+            echo "❌ ERROR: Failed to install yq. Please install it manually:"
+            echo "   For Go version: https://github.com/mikefarah/yq#install"
+            echo "   For Python version: pip install yq"
+            exit 1
+        fi
     fi
     
     YQ_VERSION=$(yq --version 2>&1 | head -n 1)
