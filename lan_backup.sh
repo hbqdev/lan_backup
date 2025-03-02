@@ -1,5 +1,5 @@
 #!/bin/bash
-# Backup Script v4.2 (With auto rsync installation)
+# Backup Script v4.3 (With auto rsync installation and improved logging)
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 CONFIG_FILE="${SCRIPT_DIR}/configs/backup_config.yaml"
@@ -9,6 +9,11 @@ LOGS_DIR="${SCRIPT_DIR}/logs"
 
 # Create directory structure if it doesn't exist
 mkdir -p "${SCRIPT_DIR}/"{data,logs,configs}
+
+# Generate a unique log filename with timestamp
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+BACKUP_ID=$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w 6 | head -n 1)
+LOG_FILE="${LOGS_DIR}/backup_${TIMESTAMP}_${BACKUP_ID}.log"
 
 # Create sample config if it doesn't exist
 if [ ! -f "$CONFIG_FILE" ]; then
@@ -365,18 +370,29 @@ install_yq() {
                 path=$(yq ".hosts[$i].paths[$p]" "$CONFIG_FILE")
                 echo "  Backing up: $path"
                 
+                use_ip=false
+                host_to_use="$hostname"
+
                 # Verify source readability with verbose output
                 echo "  Checking SSH connection..."
                 # Try with hostname first
                 echo "  Trying with hostname..."
-                sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$hostname" "ls -la $path" || {
-                    echo "  Hostname connection failed, trying with IP..."
+                if sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$hostname" "ls -la $path" &>/dev/null; then
+                    echo "  ✅ Hostname connection successful."
+                else
+                    echo "  ❌ Hostname connection failed, trying with IP..."
                     # If hostname fails, try with IP
-                    sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$ip" "ls -la $path" || {
+                    if sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$ip" "ls -la $path" &>/dev/null; then
+                        echo "  ✅ IP connection successful."
+                        use_ip=true
+                        host_to_use="$ip"
+                    else
                         echo "⚠️ WARNING: Cannot access $path on $hostname ($ip). Will try to backup anyway..."
-                        # Continue anyway instead of skipping
-                    }
-                }
+                        # Set to use IP anyway since hostname failed
+                        use_ip=true
+                        host_to_use="$ip"
+                    fi
+                fi
                 
                 # Create destination path
                 dest_path="${BACKUP_ROOT}/${hostname}${path}"
@@ -406,43 +422,32 @@ install_yq() {
                     echo "  ✅ rsync is already installed on remote host."
                 fi
                 
-                # Check again if rsync is available (it might have been installed)
-                if sshpass -v "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$hostname" "which rsync" &>/dev/null; then
-                    # Ensure destination directory exists and is accessible
-                    if [ ! -d "$dest_path" ]; then
-                        echo "  Re-creating destination directory: $dest_path"
-                        mkdir -p "$dest_path"
-                        if [ ! -d "$dest_path" ]; then
-                            echo "  ❌ ERROR: Could not create destination directory: $dest_path"
-                            continue
-                        fi
-                    fi
+                # Try rsync with different options in sequence
+                for rsync_mode in "standard" "alternative" "minimal"; do
+                    echo "  Trying rsync with $rsync_mode options..."
                     
-                    # Use absolute paths and add timeout
-                    cd "$SCRIPT_DIR" || {
-                        echo "  ❌ ERROR: Could not change to script directory: $SCRIPT_DIR"
-                        continue
-                    }
+                    case "$rsync_mode" in
+                        standard)
+                            rsync_opts="-av --progress --force --ignore-errors --delete --timeout=60"
+                            ;;
+                        alternative)
+                            rsync_opts="-av --progress --force --ignore-errors --timeout=60"
+                            ;;
+                        minimal)
+                            rsync_opts="-rlptDv --progress --force --ignore-errors --timeout=60"
+                            ;;
+                    esac
                     
-                    echo "  Starting forced rsync with absolute paths..."
-                    rsync -av --progress --force --ignore-errors --delete --timeout=60 \
+                    if rsync $rsync_opts \
                         --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
-                        "$user@$hostname:$path/" "$dest_path/" || {
-                        echo "  Rsync with hostname failed, trying with IP..."
-                        # If hostname fails, try with IP
-                        rsync -av --progress --force --ignore-errors --delete --timeout=60 \
-                            --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
-                            "$user@$ip:$path/" "$dest_path/" || {
-                            echo "  ❌ Rsync failed. Trying one more time with different options..."
-                            # Try one more time with different options
-                            rsync -rlptDv --progress --force --ignore-errors --timeout=60 \
-                                --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
-                                "$user@$ip:$path/" "$dest_path/" || {
-                                echo "  ❌ All rsync attempts failed. Some files may not have been copied."
-                            }
-                        }
-                    }
-                fi
+                        "$user@$host_to_use:$path/" "$dest_path/"; then
+                        echo "  ✅ Rsync successful with $rsync_mode options."
+                        break
+                    else
+                        echo "  ❌ Rsync failed with $rsync_mode options."
+                        # Continue to next option if this one failed
+                    fi
+                done
                 
                 # Always consider it a success since we're forcing
                 echo "  ✅ Backup attempt completed"
@@ -492,18 +497,29 @@ install_yq() {
                 path=$(yq -r ".hosts[$i].paths[$p]" "$CONFIG_FILE")
                 echo "  Backing up: $path"
                 
+                use_ip=false
+                host_to_use="$hostname"
+
                 # Verify source readability with verbose output
                 echo "  Checking SSH connection..."
                 # Try with hostname first
                 echo "  Trying with hostname..."
-                sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$hostname" "ls -la $path" || {
-                    echo "  Hostname connection failed, trying with IP..."
+                if sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$hostname" "ls -la $path" &>/dev/null; then
+                    echo "  ✅ Hostname connection successful."
+                else
+                    echo "  ❌ Hostname connection failed, trying with IP..."
                     # If hostname fails, try with IP
-                    sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$ip" "ls -la $path" || {
+                    if sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$ip" "ls -la $path" &>/dev/null; then
+                        echo "  ✅ IP connection successful."
+                        use_ip=true
+                        host_to_use="$ip"
+                    else
                         echo "⚠️ WARNING: Cannot access $path on $hostname ($ip). Will try to backup anyway..."
-                        # Continue anyway instead of skipping
-                    }
-                }
+                        # Set to use IP anyway since hostname failed
+                        use_ip=true
+                        host_to_use="$ip"
+                    fi
+                fi
                 
                 # Create destination path
                 dest_path="${BACKUP_ROOT}/${hostname}${path}"
@@ -533,43 +549,32 @@ install_yq() {
                     echo "  ✅ rsync is already installed on remote host."
                 fi
                 
-                # Check again if rsync is available (it might have been installed)
-                if sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$hostname" "which rsync" &>/dev/null; then
-                    # Ensure destination directory exists and is accessible
-                    if [ ! -d "$dest_path" ]; then
-                        echo "  Re-creating destination directory: $dest_path"
-                        mkdir -p "$dest_path"
-                        if [ ! -d "$dest_path" ]; then
-                            echo "  ❌ ERROR: Could not create destination directory: $dest_path"
-                            continue
-                        fi
-                    fi
+                # Try rsync with different options in sequence
+                for rsync_mode in "standard" "alternative" "minimal"; do
+                    echo "  Trying rsync with $rsync_mode options..."
                     
-                    # Use absolute paths and add timeout
-                    cd "$SCRIPT_DIR" || {
-                        echo "  ❌ ERROR: Could not change to script directory: $SCRIPT_DIR"
-                        continue
-                    }
+                    case "$rsync_mode" in
+                        standard)
+                            rsync_opts="-av --progress --force --ignore-errors --delete --timeout=60"
+                            ;;
+                        alternative)
+                            rsync_opts="-av --progress --force --ignore-errors --timeout=60"
+                            ;;
+                        minimal)
+                            rsync_opts="-rlptDv --progress --force --ignore-errors --timeout=60"
+                            ;;
+                    esac
                     
-                    echo "  Starting forced rsync with absolute paths..."
-                    rsync -av --progress --force --ignore-errors --delete --timeout=60 \
+                    if rsync $rsync_opts \
                         --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
-                        "$user@$hostname:$path/" "$dest_path/" || {
-                        echo "  Rsync with hostname failed, trying with IP..."
-                        # If hostname fails, try with IP
-                        rsync -av --progress --force --ignore-errors --delete --timeout=60 \
-                            --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
-                            "$user@$ip:$path/" "$dest_path/" || {
-                            echo "  ❌ Rsync failed. Trying one more time with different options..."
-                            # Try one more time with different options
-                            rsync -rlptDv --progress --force --ignore-errors --timeout=60 \
-                                --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
-                                "$user@$ip:$path/" "$dest_path/" || {
-                                echo "  ❌ All rsync attempts failed. Some files may not have been copied."
-                            }
-                        }
-                    }
-                fi
+                        "$user@$host_to_use:$path/" "$dest_path/"; then
+                        echo "  ✅ Rsync successful with $rsync_mode options."
+                        break
+                    else
+                        echo "  ❌ Rsync failed with $rsync_mode options."
+                        # Continue to next option if this one failed
+                    fi
+                done
                 
                 # Always consider it a success since we're forcing
                 echo "  ✅ Backup attempt completed"
@@ -580,5 +585,10 @@ install_yq() {
     fi
     
     echo "=== Backup Completed @ $(date) ==="
-} 2>&1 | tee -a "${LOGS_DIR}/backup_$(date +%Y%m%d).log"
+} 2>&1 | tee -a "$LOG_FILE"
+
+# Create a symlink to the latest log for easy access
+ln -sf "$LOG_FILE" "${LOGS_DIR}/latest_backup.log"
+
+echo "Log file created at: $LOG_FILE"
 
