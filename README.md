@@ -173,8 +173,6 @@ The script automatically handles root-owned files:
 - The `.env` file can be excluded from version control
 - Configuration and secrets are properly separated
 
-The script will setup all of the above in the first run. Then afterwards you just need to edit the config file and the .env file for the backup to run.
-
 ## ❓ Troubleshooting
 
 If you encounter issues with the backup:
