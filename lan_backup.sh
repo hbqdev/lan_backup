@@ -237,17 +237,17 @@ install_rsync() {
                 
                 # Check again if rsync is available (it might have been installed)
                 if sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$hostname" "which rsync" &>/dev/null; then
-                    # Sync files with force options - using SSH compression instead of rsync compression
-                    echo "  Starting forced rsync with SSH compression..."
+                    # Sync files with force options
+                    echo "  Starting forced rsync..."
                     
-                    # Try with hostname first - removed -z from rsync, added -C to SSH
-                    rsync -av --progress --force --ignore-errors --delete \
-                        --rsh="sshpass -p \"$password_var\" ssh -C -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
+                    # Try with hostname first - added force options
+                    rsync -avz --progress --force --ignore-errors --delete \
+                        --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
                         "$user@$hostname:$path/" "$dest_path/" || {
                         echo "  Rsync with hostname failed, trying with IP..."
                         # If hostname fails, try with IP
-                        rsync -av --progress --force --ignore-errors --delete \
-                            --rsh="sshpass -p \"$password_var\" ssh -C -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
+                        rsync -avz --progress --force --ignore-errors --delete \
+                            --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
                             "$user@$ip:$path/" "$dest_path/"
                     }
                 fi
@@ -343,17 +343,17 @@ install_rsync() {
                 
                 # Check again if rsync is available (it might have been installed)
                 if sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$hostname" "which rsync" &>/dev/null; then
-                    # Sync files with force options - using SSH compression instead of rsync compression
-                    echo "  Starting forced rsync with SSH compression..."
+                    # Sync files with force options
+                    echo "  Starting forced rsync..."
                     
-                    # Try with hostname first - removed -z from rsync, added -C to SSH
-                    rsync -av --progress --force --ignore-errors --delete \
-                        --rsh="sshpass -p \"$password_var\" ssh -C -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
+                    # Try with hostname first - added force options
+                    rsync -avz --progress --force --ignore-errors --delete \
+                        --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
                         "$user@$hostname:$path/" "$dest_path/" || {
                         echo "  Rsync with hostname failed, trying with IP..."
                         # If hostname fails, try with IP
-                        rsync -av --progress --force --ignore-errors --delete \
-                            --rsh="sshpass -p \"$password_var\" ssh -C -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
+                        rsync -avz --progress --force --ignore-errors --delete \
+                            --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
                             "$user@$ip:$path/" "$dest_path/"
                     }
                 fi
