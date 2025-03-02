@@ -1,0 +1,371 @@
+#!/bin/bash
+# Backup Script v4.2 (With auto rsync installation)
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+CONFIG_FILE="${SCRIPT_DIR}/configs/backup_config.yaml"
+ENV_FILE="${SCRIPT_DIR}/configs/.env"
+BACKUP_ROOT="${SCRIPT_DIR}/data"
+LOGS_DIR="${SCRIPT_DIR}/logs"
+
+# Create directory structure if it doesn't exist
+mkdir -p "${SCRIPT_DIR}/"{data,logs,configs}
+
+# Create sample config if it doesn't exist
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "📝 Creating sample configuration file..."
+    cat << EOF > "$CONFIG_FILE"
+# Backup configuration
+hosts:
+  - name: example-host
+    ip: 192.168.1.100
+    user: backupuser
+    password_key: EXAMPLE_HOST_PASSWORD  # Reference to environment variable
+    paths:
+      - /path/to/backup
+
+  # Add more hosts as needed
+EOF
+    chmod 600 "$CONFIG_FILE"
+    
+    # Create sample .env file if it doesn't exist
+    if [ ! -f "$ENV_FILE" ]; then
+        echo "📝 Creating environment file for passwords..."
+        cat << EOF > "$ENV_FILE"
+# Environment file for secure password storage
+# This file should be kept secure and not shared
+
+# Format: HOST_PASSWORD=your_password_here
+EXAMPLE_HOST_PASSWORD=your_password_here
+
+# Add more passwords as needed
+EOF
+        chmod 600 "$ENV_FILE"
+        echo "✅ Sample environment file created at $ENV_FILE"
+    fi
+    
+    echo "✅ Sample configuration created at $CONFIG_FILE"
+    echo "⚠️ Please edit the configuration files before running the backup:"
+    echo "   1. Edit config: nano $CONFIG_FILE"
+    echo "   2. Set passwords: nano $ENV_FILE"
+    exit 0
+fi
+
+# Create .env file if it doesn't exist
+if [ ! -f "$ENV_FILE" ]; then
+    echo "📝 Creating environment file for passwords..."
+    cat << EOF > "$ENV_FILE"
+# Environment file for secure password storage
+# This file should be kept secure and not shared
+
+# Format: HOST_PASSWORD=your_password_here
+# Add passwords for each host in your config file
+EOF
+    chmod 600 "$ENV_FILE"
+    echo "✅ Environment file created at $ENV_FILE"
+    echo "⚠️ Please add your passwords to the environment file before running the backup."
+    echo "   Use: nano $ENV_FILE"
+    exit 0
+fi
+
+# Set proper permissions
+chmod 700 "${SCRIPT_DIR}/configs"
+chmod 600 "$ENV_FILE"
+
+# Source the environment file to load passwords
+source "$ENV_FILE"
+
+# Create logs directory if it doesn't exist
+mkdir -p "${LOGS_DIR}"
+
+# Function to detect Linux distribution and install rsync
+install_rsync() {
+    local host=$1
+    local user=$2
+    local password=$3
+    
+    echo "  🔧 Attempting to install rsync on $host..."
+    
+    # Try to detect the package manager
+    if sshpass -p "$password" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host" "command -v apt-get" &>/dev/null; then
+        echo "  📦 Debian/Ubuntu detected. Installing rsync using apt-get..."
+        sshpass -p "$password" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host" "sudo apt-get update && sudo apt-get install -y rsync" || {
+            echo "  ❌ Failed to install rsync with apt-get. Trying without sudo..."
+            sshpass -p "$password" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host" "apt-get update && apt-get install -y rsync"
+        }
+    elif sshpass -p "$password" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host" "command -v yum" &>/dev/null; then
+        echo "  📦 RHEL/CentOS/Fedora detected. Installing rsync using yum..."
+        sshpass -p "$password" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host" "sudo yum install -y rsync" || {
+            echo "  ❌ Failed to install rsync with yum. Trying without sudo..."
+            sshpass -p "$password" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host" "yum install -y rsync"
+        }
+    elif sshpass -p "$password" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host" "command -v dnf" &>/dev/null; then
+        echo "  📦 Fedora/RHEL detected. Installing rsync using dnf..."
+        sshpass -p "$password" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host" "sudo dnf install -y rsync" || {
+            echo "  ❌ Failed to install rsync with dnf. Trying without sudo..."
+            sshpass -p "$password" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host" "dnf install -y rsync"
+        }
+    elif sshpass -p "$password" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host" "command -v zypper" &>/dev/null; then
+        echo "  📦 openSUSE detected. Installing rsync using zypper..."
+        sshpass -p "$password" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host" "sudo zypper install -y rsync" || {
+            echo "  ❌ Failed to install rsync with zypper. Trying without sudo..."
+            sshpass -p "$password" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host" "zypper install -y rsync"
+        }
+    elif sshpass -p "$password" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host" "command -v pacman" &>/dev/null; then
+        echo "  📦 Arch Linux detected. Installing rsync using pacman..."
+        sshpass -p "$password" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host" "sudo pacman -S --noconfirm rsync" || {
+            echo "  ❌ Failed to install rsync with pacman. Trying without sudo..."
+            sshpass -p "$password" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host" "pacman -S --noconfirm rsync"
+        }
+    else
+        echo "  ❌ Could not detect package manager. Unable to install rsync automatically."
+        return 1
+    fi
+    
+    # Check if rsync was installed successfully
+    if sshpass -p "$password" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$host" "which rsync" &>/dev/null; then
+        echo "  ✅ rsync installed successfully on $host."
+        return 0
+    else
+        echo "  ❌ Failed to install rsync on $host."
+        return 1
+    fi
+}
+
+{
+    echo "=== Backup Started @ $(date) ==="
+    
+    # Check if config file exists
+    if [ ! -f "$CONFIG_FILE" ]; then
+        echo "❌ ERROR: Configuration file not found at $CONFIG_FILE"
+        exit 1
+    fi
+    
+    # Check which version of yq is installed
+    if ! command -v yq &> /dev/null; then
+        echo "❌ ERROR: yq is not installed. Please install it first."
+        echo "   For Go version: https://github.com/mikefarah/yq#install"
+        echo "   For Python version: pip install yq"
+        exit 1
+    fi
+    
+    YQ_VERSION=$(yq --version 2>&1 | head -n 1)
+    echo "Using YQ version: $YQ_VERSION"
+    
+    # Process hosts - adjust yq syntax based on version
+    if [[ "$YQ_VERSION" == *"mikefarah"* ]]; then
+        # For yq v4 (Go version by mikefarah)
+        hosts_count=$(yq '.hosts | length' "$CONFIG_FILE")
+        
+        for ((i=0; i<hosts_count; i++)); do
+            hostname=$(yq ".hosts[$i].name" "$CONFIG_FILE")
+            ip=$(yq ".hosts[$i].ip" "$CONFIG_FILE")
+            user=$(yq ".hosts[$i].user" "$CONFIG_FILE")
+            
+            # Try to get password_key first (new format)
+            password_key=$(yq ".hosts[$i].password_key" "$CONFIG_FILE")
+            
+            # If password_key is null or empty, try the old format with password
+            if [[ "$password_key" == "null" || -z "$password_key" ]]; then
+                password_raw=$(yq ".hosts[$i].password" "$CONFIG_FILE")
+                # If it starts with a variable name, use it as a key
+                if [[ "$password_raw" == *"_PASSWORD"* ]]; then
+                    password_key=$(echo "$password_raw" | tr -d '"')
+                    password_var="${!password_key}"
+                else
+                    # Otherwise use the raw password
+                    password_var=$(echo "$password_raw" | tr -d '"')
+                fi
+            else
+                # Get password from environment variable
+                password_var="${!password_key}"
+            fi
+            
+            # Check if password is set
+            if [ -z "$password_var" ]; then
+                echo "❌ ERROR: Password for $hostname not found."
+                echo "   Please check your configuration and environment file."
+                continue
+            fi
+            
+            echo "Processing: $hostname ($ip)"
+            
+            path_count=$(yq ".hosts[$i].paths | length" "$CONFIG_FILE")
+            for ((p=0; p<path_count; p++)); do
+                path=$(yq ".hosts[$i].paths[$p]" "$CONFIG_FILE")
+                echo "  Backing up: $path"
+                
+                # Verify source readability with verbose output
+                echo "  Checking SSH connection..."
+                # Try with hostname first
+                echo "  Trying with hostname..."
+                sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$hostname" "ls -la $path" || {
+                    echo "  Hostname connection failed, trying with IP..."
+                    # If hostname fails, try with IP
+                    sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$ip" "ls -la $path" || {
+                        echo "⚠️ WARNING: Cannot access $path on $hostname ($ip). Will try to backup anyway..."
+                        # Continue anyway instead of skipping
+                    }
+                }
+                
+                # Create destination path
+                dest_path="${BACKUP_ROOT}/${hostname}${path}"
+                mkdir -p "$dest_path"
+                echo "  Destination path: $dest_path"
+                
+                # Check if rsync is installed on remote host
+                echo "  Checking if rsync is installed on remote host..."
+                if ! sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$hostname" "which rsync" &>/dev/null; then
+                    echo "  ⚠️ WARNING: rsync not found on remote host."
+                    
+                    # Try to install rsync
+                    if install_rsync "$hostname" "$user" "$password_var"; then
+                        echo "  ✅ rsync installed successfully. Proceeding with rsync backup."
+                    else
+                        echo "  ⚠️ Could not install rsync. Falling back to scp."
+                        # Use scp as fallback with force options
+                        echo "  Starting forced scp copy..."
+                        
+                        # Try with hostname first
+                        sshpass -p "$password_var" scp -r -f -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$hostname:$path/*" "$dest_path/" || {
+                            echo "  SCP with hostname failed, trying with IP..."
+                            sshpass -p "$password_var" scp -r -f -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$ip:$path/*" "$dest_path/"
+                        }
+                    fi
+                else
+                    echo "  ✅ rsync is already installed on remote host."
+                fi
+                
+                # Check again if rsync is available (it might have been installed)
+                if sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$hostname" "which rsync" &>/dev/null; then
+                    # Sync files with force options - using SSH compression instead of rsync compression
+                    echo "  Starting forced rsync with SSH compression..."
+                    
+                    # Try with hostname first - removed -z from rsync, added -C to SSH
+                    rsync -av --progress --force --ignore-errors --delete \
+                        --rsh="sshpass -p \"$password_var\" ssh -C -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
+                        "$user@$hostname:$path/" "$dest_path/" || {
+                        echo "  Rsync with hostname failed, trying with IP..."
+                        # If hostname fails, try with IP
+                        rsync -av --progress --force --ignore-errors --delete \
+                            --rsh="sshpass -p \"$password_var\" ssh -C -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
+                            "$user@$ip:$path/" "$dest_path/"
+                    }
+                fi
+                
+                # Always consider it a success since we're forcing
+                echo "  ✅ Backup attempt completed"
+                ls -la "$dest_path"
+                echo "  Note: Some files may have been skipped due to permissions or other issues"
+            done
+        done
+    else
+        # For older yq versions (Python version)
+        hosts_count=$(yq -r '.hosts | length' "$CONFIG_FILE")
+        
+        for ((i=0; i<hosts_count; i++)); do
+            hostname=$(yq -r ".hosts[$i].name" "$CONFIG_FILE")
+            ip=$(yq -r ".hosts[$i].ip" "$CONFIG_FILE")
+            user=$(yq -r ".hosts[$i].user" "$CONFIG_FILE")
+            
+            # Try to get password_key first (new format)
+            password_key=$(yq -r ".hosts[$i].password_key" "$CONFIG_FILE")
+            
+            # If password_key is null or empty, try the old format with password
+            if [[ "$password_key" == "null" || -z "$password_key" ]]; then
+                password_raw=$(yq -r ".hosts[$i].password" "$CONFIG_FILE")
+                # If it starts with a variable name, use it as a key
+                if [[ "$password_raw" == *"_PASSWORD"* ]]; then
+                    password_key=$(echo "$password_raw" | tr -d '"')
+                    password_var="${!password_key}"
+                else
+                    # Otherwise use the raw password
+                    password_var=$(echo "$password_raw" | tr -d '"')
+                fi
+            else
+                # Get password from environment variable
+                password_var="${!password_key}"
+            fi
+            
+            # Check if password is set
+            if [ -z "$password_var" ]; then
+                echo "❌ ERROR: Password for $hostname not found."
+                echo "   Please check your configuration and environment file."
+                continue
+            fi
+            
+            echo "Processing: $hostname ($ip)"
+            
+            path_count=$(yq -r ".hosts[$i].paths | length" "$CONFIG_FILE")
+            for ((p=0; p<path_count; p++)); do
+                path=$(yq -r ".hosts[$i].paths[$p]" "$CONFIG_FILE")
+                echo "  Backing up: $path"
+                
+                # Verify source readability with verbose output
+                echo "  Checking SSH connection..."
+                # Try with hostname first
+                echo "  Trying with hostname..."
+                sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$hostname" "ls -la $path" || {
+                    echo "  Hostname connection failed, trying with IP..."
+                    # If hostname fails, try with IP
+                    sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$ip" "ls -la $path" || {
+                        echo "⚠️ WARNING: Cannot access $path on $hostname ($ip). Will try to backup anyway..."
+                        # Continue anyway instead of skipping
+                    }
+                }
+                
+                # Create destination path
+                dest_path="${BACKUP_ROOT}/${hostname}${path}"
+                mkdir -p "$dest_path"
+                echo "  Destination path: $dest_path"
+                
+                # Check if rsync is installed on remote host
+                echo "  Checking if rsync is installed on remote host..."
+                if ! sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$hostname" "which rsync" &>/dev/null; then
+                    echo "  ⚠️ WARNING: rsync not found on remote host."
+                    
+                    # Try to install rsync
+                    if install_rsync "$hostname" "$user" "$password_var"; then
+                        echo "  ✅ rsync installed successfully. Proceeding with rsync backup."
+                    else
+                        echo "  ⚠️ Could not install rsync. Falling back to scp."
+                        # Use scp as fallback with force options
+                        echo "  Starting forced scp copy..."
+                        
+                        # Try with hostname first
+                        sshpass -p "$password_var" scp -r -f -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$hostname:$path/*" "$dest_path/" || {
+                            echo "  SCP with hostname failed, trying with IP..."
+                            sshpass -p "$password_var" scp -r -f -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$ip:$path/*" "$dest_path/"
+                        }
+                    fi
+                else
+                    echo "  ✅ rsync is already installed on remote host."
+                fi
+                
+                # Check again if rsync is available (it might have been installed)
+                if sshpass -p "$password_var" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no "$user@$hostname" "which rsync" &>/dev/null; then
+                    # Sync files with force options - using SSH compression instead of rsync compression
+                    echo "  Starting forced rsync with SSH compression..."
+                    
+                    # Try with hostname first - removed -z from rsync, added -C to SSH
+                    rsync -av --progress --force --ignore-errors --delete \
+                        --rsh="sshpass -p \"$password_var\" ssh -C -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
+                        "$user@$hostname:$path/" "$dest_path/" || {
+                        echo "  Rsync with hostname failed, trying with IP..."
+                        # If hostname fails, try with IP
+                        rsync -av --progress --force --ignore-errors --delete \
+                            --rsh="sshpass -p \"$password_var\" ssh -C -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
+                            "$user@$ip:$path/" "$dest_path/"
+                    }
+                fi
+                
+                # Always consider it a success since we're forcing
+                echo "  ✅ Backup attempt completed"
+                ls -la "$dest_path"
+                echo "  Note: Some files may have been skipped due to permissions or other issues"
+            done
+        done
+    fi
+    
+    echo "=== Backup Completed @ $(date) ==="
+} 2>&1 | tee -a "${LOGS_DIR}/backup_$(date +%Y%m%d).log"
+
