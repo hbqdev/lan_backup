@@ -1,4 +1,3 @@
-cat > README.md << EOF
 # LAN Backup System
 
 A simple, secure system for backing up data from multiple hosts on a local network.
