@@ -761,7 +761,7 @@ install_yq() {
                 )
                 
                 # Default strategy (can be overridden in config)
-                backup_strategy="incremental"
+                backup_strategy="large-incremental"
                 
                 # Try to get host-specific backup strategy
                 host_backup_strategy=$(yq ".hosts[$i].backup_strategy" "$CONFIG_FILE" 2>/dev/null)
