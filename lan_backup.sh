@@ -31,6 +31,17 @@ while [[ "$#" -gt 0 ]]; do
             echo "  --bwlimit, --bandwidth-limit VALUE  Set bandwidth limit in KB/s (default: $DEFAULT_BANDWIDTH_LIMIT)"
             echo "  --unlimited                         Run without bandwidth limits"
             echo "  --help                              Show this help message"
+            echo
+            echo "Backup Strategies (configurable per host in backup_config.yaml):"
+            echo "  mirror       - Creates an exact copy, deleting files at destination that don't exist at source"
+            echo "  incremental  - Keeps previous versions in snapshots directory (default)"
+            echo "  safe         - Only adds or updates files, never deletes"
+            echo
+            echo "Example configuration in backup_config.yaml:"
+            echo "  hosts:"
+            echo "    - name: server1"
+            echo "      backup_strategy: incremental"
+            echo "      max_snapshots: 7"
             exit 0
             ;;
         *)
@@ -64,6 +75,21 @@ hosts:
       - /path/to/backup
     # Optional: Set bandwidth limit in KB/s for this host (overrides global setting)
     # bandwidth_limit: 2048
+    
+    # Optional: Backup strategy (mirror, incremental, safe)
+    # - mirror: Creates an exact copy, deleting files at destination that don't exist at source
+    # - incremental: Keeps previous versions in snapshots directory (default)
+    # - safe: Only adds or updates files, never deletes
+    # backup_strategy: incremental
+    
+    # Optional: Maximum number of snapshots to keep (for incremental strategy)
+    # max_snapshots: 7
+    
+    # Optional: Exclude patterns (files/directories to exclude from backup)
+    # exclude:
+    #   - "*.tmp"
+    #   - "temp/"
+    #   - "cache/"
 
   # Add more hosts as needed
 EOF
@@ -465,47 +491,124 @@ install_yq() {
                     host_bandwidth_limit=$BANDWIDTH_LIMIT
                 fi
                 
-                # Try rsync with different options in sequence
-                for rsync_mode in "standard" "alternative" "minimal"; do
-                    echo "  Trying rsync with $rsync_mode options..."
-                    
-                    case "$rsync_mode" in
-                        standard)
-                            rsync_opts="-av --progress --force --ignore-errors --delete --timeout=60"
-                            ;;
-                        alternative)
-                            rsync_opts="-av --progress --force --ignore-errors --timeout=60"
-                            ;;
-                        minimal)
-                            rsync_opts="-rlptDv --progress --force --ignore-errors --timeout=60"
-                            ;;
-                    esac
-                    
-                    # Add bandwidth limit if set
-                    if [ "$host_bandwidth_limit" -gt 0 ]; then
-                        echo "  Applying bandwidth limit: $host_bandwidth_limit KB/s"
-                        rsync_opts="$rsync_opts --bwlimit=$host_bandwidth_limit"
-                    fi
-                    
-                    # Make sure destination directory exists and is accessible
-                    mkdir -p "$dest_path"
-                    
-                    # Change to script directory to avoid getcwd errors
-                    cd "$SCRIPT_DIR"
-                    
-                    # Use absolute paths for both source and destination
-                    if rsync $rsync_opts \
-                        --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
-                        "$user@$host_to_use:$path/" "$(realpath "$dest_path")/"; then
-                        echo "  ✅ Rsync successful with $rsync_mode options."
-                        break
-                    else
-                        echo "  ❌ Rsync failed with $rsync_mode options."
-                        # Continue to next option if this one failed
-                    fi
-                done
+                # Use a more robust backup strategy based on industry standards
+                # Define backup strategy options
+                echo "  Selecting appropriate backup strategy..."
                 
-                # Always consider it a success since we're forcing
+                # Define backup strategies with clear purposes
+                declare -A backup_strategies
+                backup_strategies=(
+                    ["mirror"]="--archive --hard-links --acls --xattrs --delete --delete-excluded --progress --stats --timeout=120"
+                    ["incremental"]="--archive --hard-links --acls --xattrs --backup --backup-dir=\"$(realpath "$dest_path")/../.snapshots/$(date +%Y-%m-%d_%H-%M-%S)\" --progress --stats --timeout=120"
+                    ["safe"]="--archive --hard-links --acls --xattrs --update --progress --stats --timeout=120"
+                )
+                
+                # Default strategy (can be overridden in config)
+                backup_strategy="incremental"
+                
+                # Try to get host-specific backup strategy
+                host_backup_strategy=$(yq ".hosts[$i].backup_strategy" "$CONFIG_FILE" 2>/dev/null)
+                if [[ "$host_backup_strategy" != "null" && -n "$host_backup_strategy" ]]; then
+                    if [[ -n "${backup_strategies[$host_backup_strategy]}" ]]; then
+                        backup_strategy="$host_backup_strategy"
+                    else
+                        echo "  ⚠️ Unknown backup strategy '$host_backup_strategy' in config, using default '$backup_strategy'"
+                    fi
+                fi
+                
+                # Get the rsync options for the selected strategy
+                rsync_opts="${backup_strategies[$backup_strategy]}"
+                
+                # Add common options
+                rsync_opts="$rsync_opts --human-readable --partial --info=progress2"
+                
+                # Add bandwidth limit if set
+                if [ "$host_bandwidth_limit" -gt 0 ]; then
+                    echo "  Applying bandwidth limit: $host_bandwidth_limit KB/s"
+                    rsync_opts="$rsync_opts --bwlimit=$host_bandwidth_limit"
+                fi
+                
+                # Create snapshot directory if using incremental backup
+                if [[ "$backup_strategy" == "incremental" ]]; then
+                    snapshot_dir="$(realpath "$dest_path")/../.snapshots"
+                    mkdir -p "$snapshot_dir"
+                    echo "  Using incremental backup with snapshots in: $snapshot_dir"
+                    
+                    # Keep only the last 7 snapshots by default (configurable)
+                    max_snapshots=7
+                    host_max_snapshots=$(yq ".hosts[$i].max_snapshots" "$CONFIG_FILE" 2>/dev/null)
+                    if [[ "$host_max_snapshots" != "null" && -n "$host_max_snapshots" ]]; then
+                        max_snapshots=$host_max_snapshots
+                    fi
+                    
+                    # Clean up old snapshots
+                    snapshot_count=$(ls -1 "$snapshot_dir" 2>/dev/null | wc -l)
+                    if [ "$snapshot_count" -gt "$max_snapshots" ]; then
+                        echo "  Cleaning up old snapshots (keeping $max_snapshots most recent)..."
+                        ls -1t "$snapshot_dir" | tail -n +$((max_snapshots+1)) | xargs -I {} rm -rf "$snapshot_dir/{}"
+                    fi
+                fi
+                
+                echo "  Using backup strategy: $backup_strategy"
+                
+                # Make sure destination directory exists and is accessible
+                mkdir -p "$dest_path"
+                
+                # Change to script directory to avoid getcwd errors
+                cd "$SCRIPT_DIR"
+                
+                # Add exclusion patterns if specified in config
+                exclusion_opts=""
+                exclusion_count=$(yq ".hosts[$i].exclude | length" "$CONFIG_FILE" 2>/dev/null)
+                if [[ "$exclusion_count" != "null" && "$exclusion_count" -gt 0 ]]; then
+                    for ((e=0; e<exclusion_count; e++)); do
+                        exclude_pattern=$(yq ".hosts[$i].exclude[$e]" "$CONFIG_FILE")
+                        exclusion_opts="$exclusion_opts --exclude=\"$exclude_pattern\""
+                    done
+                    echo "  Using exclusion patterns: $exclusion_opts"
+                fi
+                
+                # Use absolute paths for both source and destination
+                echo "  Starting backup with $backup_strategy strategy..."
+                rsync_command="rsync $rsync_opts $exclusion_opts --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+                
+                # Execute the rsync command
+                if eval "$rsync_command"; then
+                    echo "  ✅ Backup successful with $backup_strategy strategy."
+                    
+                    # Create a success marker file with timestamp
+                    echo "$(date)" > "$(realpath "$dest_path")/.backup_success"
+                    
+                    # Calculate and display backup statistics
+                    echo "  📊 Backup Statistics:"
+                    echo "    - Total Files: $(find "$(realpath "$dest_path")" -type f | wc -l)"
+                    echo "    - Total Size: $(du -sh "$(realpath "$dest_path")" | cut -f1)"
+                    
+                    # If using incremental, show snapshot info
+                    if [[ "$backup_strategy" == "incremental" && -d "$snapshot_dir" ]]; then
+                        latest_snapshot=$(ls -1t "$snapshot_dir" 2>/dev/null | head -n 1)
+                        if [[ -n "$latest_snapshot" ]]; then
+                            echo "    - Latest Snapshot: $latest_snapshot"
+                            echo "    - Snapshot Size: $(du -sh "$snapshot_dir/$latest_snapshot" 2>/dev/null | cut -f1)"
+                            echo "    - Changed Files: $(find "$snapshot_dir/$latest_snapshot" -type f | wc -l)"
+                        fi
+                    fi
+                else
+                    echo "  ❌ Backup failed with $backup_strategy strategy."
+                    echo "  ⚠️ Trying with safe strategy as fallback..."
+                    
+                    # Fallback to safe strategy if the chosen strategy fails
+                    rsync_command="rsync ${backup_strategies["safe"]} --human-readable --partial --info=progress2 $exclusion_opts --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+                    
+                    if eval "$rsync_command"; then
+                        echo "  ✅ Backup successful with safe fallback strategy."
+                        echo "$(date)" > "$(realpath "$dest_path")/.backup_success"
+                    else
+                        echo "  ❌ Backup failed with safe fallback strategy."
+                        echo "$(date)" > "$(realpath "$dest_path")/.backup_failed"
+                    fi
+                fi
+                
                 echo "  ✅ Backup attempt completed"
                 ls -la "$dest_path"
                 echo "  Note: Some files may have been skipped due to permissions or other issues"
@@ -611,47 +714,124 @@ install_yq() {
                     host_bandwidth_limit=$BANDWIDTH_LIMIT
                 fi
                 
-                # Try rsync with different options in sequence
-                for rsync_mode in "standard" "alternative" "minimal"; do
-                    echo "  Trying rsync with $rsync_mode options..."
-                    
-                    case "$rsync_mode" in
-                        standard)
-                            rsync_opts="-av --progress --force --ignore-errors --delete --timeout=60"
-                            ;;
-                        alternative)
-                            rsync_opts="-av --progress --force --ignore-errors --timeout=60"
-                            ;;
-                        minimal)
-                            rsync_opts="-rlptDv --progress --force --ignore-errors --timeout=60"
-                            ;;
-                    esac
-                    
-                    # Add bandwidth limit if set
-                    if [ "$host_bandwidth_limit" -gt 0 ]; then
-                        echo "  Applying bandwidth limit: $host_bandwidth_limit KB/s"
-                        rsync_opts="$rsync_opts --bwlimit=$host_bandwidth_limit"
-                    fi
-                    
-                    # Make sure destination directory exists and is accessible
-                    mkdir -p "$dest_path"
-                    
-                    # Change to script directory to avoid getcwd errors
-                    cd "$SCRIPT_DIR"
-                    
-                    # Use absolute paths for both source and destination
-                    if rsync $rsync_opts \
-                        --rsh="sshpass -p \"$password_var\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no" \
-                        "$user@$host_to_use:$path/" "$(realpath "$dest_path")/"; then
-                        echo "  ✅ Rsync successful with $rsync_mode options."
-                        break
-                    else
-                        echo "  ❌ Rsync failed with $rsync_mode options."
-                        # Continue to next option if this one failed
-                    fi
-                done
+                # Use a more robust backup strategy based on industry standards
+                # Define backup strategy options
+                echo "  Selecting appropriate backup strategy..."
                 
-                # Always consider it a success since we're forcing
+                # Define backup strategies with clear purposes
+                declare -A backup_strategies
+                backup_strategies=(
+                    ["mirror"]="--archive --hard-links --acls --xattrs --delete --delete-excluded --progress --stats --timeout=120"
+                    ["incremental"]="--archive --hard-links --acls --xattrs --backup --backup-dir=\"$(realpath "$dest_path")/../.snapshots/$(date +%Y-%m-%d_%H-%M-%S)\" --progress --stats --timeout=120"
+                    ["safe"]="--archive --hard-links --acls --xattrs --update --progress --stats --timeout=120"
+                )
+                
+                # Default strategy (can be overridden in config)
+                backup_strategy="incremental"
+                
+                # Try to get host-specific backup strategy
+                host_backup_strategy=$(yq ".hosts[$i].backup_strategy" "$CONFIG_FILE" 2>/dev/null)
+                if [[ "$host_backup_strategy" != "null" && -n "$host_backup_strategy" ]]; then
+                    if [[ -n "${backup_strategies[$host_backup_strategy]}" ]]; then
+                        backup_strategy="$host_backup_strategy"
+                    else
+                        echo "  ⚠️ Unknown backup strategy '$host_backup_strategy' in config, using default '$backup_strategy'"
+                    fi
+                fi
+                
+                # Get the rsync options for the selected strategy
+                rsync_opts="${backup_strategies[$backup_strategy]}"
+                
+                # Add common options
+                rsync_opts="$rsync_opts --human-readable --partial --info=progress2"
+                
+                # Add bandwidth limit if set
+                if [ "$host_bandwidth_limit" -gt 0 ]; then
+                    echo "  Applying bandwidth limit: $host_bandwidth_limit KB/s"
+                    rsync_opts="$rsync_opts --bwlimit=$host_bandwidth_limit"
+                fi
+                
+                # Create snapshot directory if using incremental backup
+                if [[ "$backup_strategy" == "incremental" ]]; then
+                    snapshot_dir="$(realpath "$dest_path")/../.snapshots"
+                    mkdir -p "$snapshot_dir"
+                    echo "  Using incremental backup with snapshots in: $snapshot_dir"
+                    
+                    # Keep only the last 7 snapshots by default (configurable)
+                    max_snapshots=7
+                    host_max_snapshots=$(yq ".hosts[$i].max_snapshots" "$CONFIG_FILE" 2>/dev/null)
+                    if [[ "$host_max_snapshots" != "null" && -n "$host_max_snapshots" ]]; then
+                        max_snapshots=$host_max_snapshots
+                    fi
+                    
+                    # Clean up old snapshots
+                    snapshot_count=$(ls -1 "$snapshot_dir" 2>/dev/null | wc -l)
+                    if [ "$snapshot_count" -gt "$max_snapshots" ]; then
+                        echo "  Cleaning up old snapshots (keeping $max_snapshots most recent)..."
+                        ls -1t "$snapshot_dir" | tail -n +$((max_snapshots+1)) | xargs -I {} rm -rf "$snapshot_dir/{}"
+                    fi
+                fi
+                
+                echo "  Using backup strategy: $backup_strategy"
+                
+                # Make sure destination directory exists and is accessible
+                mkdir -p "$dest_path"
+                
+                # Change to script directory to avoid getcwd errors
+                cd "$SCRIPT_DIR"
+                
+                # Add exclusion patterns if specified in config
+                exclusion_opts=""
+                exclusion_count=$(yq ".hosts[$i].exclude | length" "$CONFIG_FILE" 2>/dev/null)
+                if [[ "$exclusion_count" != "null" && "$exclusion_count" -gt 0 ]]; then
+                    for ((e=0; e<exclusion_count; e++)); do
+                        exclude_pattern=$(yq ".hosts[$i].exclude[$e]" "$CONFIG_FILE")
+                        exclusion_opts="$exclusion_opts --exclude=\"$exclude_pattern\""
+                    done
+                    echo "  Using exclusion patterns: $exclusion_opts"
+                fi
+                
+                # Use absolute paths for both source and destination
+                echo "  Starting backup with $backup_strategy strategy..."
+                rsync_command="rsync $rsync_opts $exclusion_opts --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+                
+                # Execute the rsync command
+                if eval "$rsync_command"; then
+                    echo "  ✅ Backup successful with $backup_strategy strategy."
+                    
+                    # Create a success marker file with timestamp
+                    echo "$(date)" > "$(realpath "$dest_path")/.backup_success"
+                    
+                    # Calculate and display backup statistics
+                    echo "  📊 Backup Statistics:"
+                    echo "    - Total Files: $(find "$(realpath "$dest_path")" -type f | wc -l)"
+                    echo "    - Total Size: $(du -sh "$(realpath "$dest_path")" | cut -f1)"
+                    
+                    # If using incremental, show snapshot info
+                    if [[ "$backup_strategy" == "incremental" && -d "$snapshot_dir" ]]; then
+                        latest_snapshot=$(ls -1t "$snapshot_dir" 2>/dev/null | head -n 1)
+                        if [[ -n "$latest_snapshot" ]]; then
+                            echo "    - Latest Snapshot: $latest_snapshot"
+                            echo "    - Snapshot Size: $(du -sh "$snapshot_dir/$latest_snapshot" 2>/dev/null | cut -f1)"
+                            echo "    - Changed Files: $(find "$snapshot_dir/$latest_snapshot" -type f | wc -l)"
+                        fi
+                    fi
+                else
+                    echo "  ❌ Backup failed with $backup_strategy strategy."
+                    echo "  ⚠️ Trying with safe strategy as fallback..."
+                    
+                    # Fallback to safe strategy if the chosen strategy fails
+                    rsync_command="rsync ${backup_strategies["safe"]} --human-readable --partial --info=progress2 $exclusion_opts --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+                    
+                    if eval "$rsync_command"; then
+                        echo "  ✅ Backup successful with safe fallback strategy."
+                        echo "$(date)" > "$(realpath "$dest_path")/.backup_success"
+                    else
+                        echo "  ❌ Backup failed with safe fallback strategy."
+                        echo "$(date)" > "$(realpath "$dest_path")/.backup_failed"
+                    fi
+                fi
+                
                 echo "  ✅ Backup attempt completed"
                 ls -la "$dest_path"
                 echo "  Note: Some files may have been skipped due to permissions or other issues"

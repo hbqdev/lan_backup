@@ -6,12 +6,16 @@ A simple, secure system for backing up data from multiple hosts on a local netwo
 
 - Backs up multiple hosts and paths
 - Supports both hostname and IP-based connections
+- Multiple backup strategies (mirror, incremental, safe)
+- Incremental backups with configurable snapshot retention
 - Automatically detects and adapts to different YQ versions
 - Automatically installs rsync on remote hosts if missing
 - Falls back to SCP if rsync installation fails
 - Secure password management via environment file
-- Force copy option to override errors and continue backups
-- Detailed logging and error handling
+- Bandwidth control with configurable limits
+- File exclusion patterns support
+- Detailed logging with statistics reporting
+- Automatic fallback to safer strategies if preferred strategy fails
 
 ## Setup
 
@@ -29,6 +33,24 @@ The backup system is now completely self-contained in a single script. To get st
    ```
 5. Run the backup: `./lan_backup.sh`
 
+## Backup Strategies
+
+The script supports three different backup strategies that can be configured per host:
+
+1. **Mirror** (`mirror`):
+   - Creates an exact copy of the source at the destination
+   - Deletes files at the destination that don't exist at the source
+   - Perfect for when you need an exact replica of the source
+
+2. **Incremental** (`incremental`) - Default:
+   - Preserves previous versions of files in a snapshots directory
+   - Automatically manages snapshots with configurable retention
+   - Ideal for most backup scenarios where you want to recover previous versions
+
+3. **Safe** (`safe`):
+   - Only adds or updates files, never deletes anything
+   - Good for cautious backups where data preservation is critical
+
 ## Configuration
 
 ### Host Configuration (configs/backup_config.yaml)
@@ -43,9 +65,38 @@ hosts:
     paths:
       - /path/to/backup
       - /another/path
+    # Optional: Set bandwidth limit in KB/s for this host (overrides global setting)
+    # bandwidth_limit: 2048
+    
+    # Optional: Backup strategy (mirror, incremental, safe)
+    # backup_strategy: incremental
+    
+    # Optional: Maximum number of snapshots to keep (for incremental strategy)
+    # max_snapshots: 7
+    
+    # Optional: Exclude patterns (files/directories to exclude from backup)
+    # exclude:
+    #   - "*.tmp"
+    #   - "temp/"
+    #   - "cache/"
 ```
 
 ### Password Configuration (configs/.env)
+
+```
+# Environment file for secure password storage
+EXAMPLE_HOST_PASSWORD=your_password_here
+```
+
+## Command Line Options
+
+```
+Usage: ./lan_backup.sh [options]
+Options:
+  --bwlimit, --bandwidth-limit VALUE  Set bandwidth limit in KB/s (default: 5120)
+  --unlimited                         Run without bandwidth limits
+  --help                              Show this help message
+```
 
 ## Requirements
 
