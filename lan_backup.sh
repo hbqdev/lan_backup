@@ -354,6 +354,7 @@ install_yq() {
 
 {
     echo "=== Backup Started @ $(date) ==="
+    echo "🚀 Starting backup process..."
     
     # Check if config file exists
     if [ ! -f "$CONFIG_FILE" ]; then
@@ -446,11 +447,13 @@ install_yq() {
             fi
             
             echo "Processing: $hostname ($ip)"
+            echo "🔄 Starting backup for host: $hostname"
             
             path_count=$(yq ".hosts[$i].paths | length" "$CONFIG_FILE")
             for ((p=0; p<path_count; p++)); do
                 path=$(yq ".hosts[$i].paths[$p]" "$CONFIG_FILE")
                 echo "  Backing up: $path"
+                echo "  📂 Path: $path"
                 
                 use_ip=false
                 host_to_use="$hostname"
@@ -552,7 +555,7 @@ install_yq() {
                 if [[ "$backup_strategy" == "incremental" ]]; then
                     snapshot_dir="$(realpath "$dest_path")/../.snapshots"
                     mkdir -p "$snapshot_dir"
-                    echo "  Using incremental backup with snapshots in: $snapshot_dir"
+                    echo "  📸 Using incremental backup with snapshots in: $snapshot_dir"
                     
                     # Keep only the last 7 snapshots by default (configurable)
                     max_snapshots=7
@@ -601,8 +604,8 @@ install_yq() {
                     
                     # Calculate and display backup statistics
                     echo "  📊 Backup Statistics:"
-                    echo "    - Total Files: $(find "$(realpath "$dest_path")" -type f | wc -l)"
-                    echo "    - Total Size: $(du -sh "$(realpath "$dest_path")" | cut -f1)"
+                    echo "    - 📁 Total Files: $(find "$(realpath "$dest_path")" -type f | wc -l)"
+                    echo "    - 💾 Total Size: $(du -sh "$(realpath "$dest_path")" | cut -f1)"
                     
                     # If using incremental, show snapshot info
                     if [[ "$backup_strategy" == "incremental" && -d "$snapshot_dir" ]]; then
@@ -634,7 +637,7 @@ install_yq() {
                 echo "  Note: Some files may have been skipped due to permissions or other issues"
             done
             if [ "$SLEEP_BETWEEN_HOSTS" -gt 0 ]; then
-                echo "Sleeping for $SLEEP_BETWEEN_HOSTS seconds before next host..."
+                echo "⏱️ Sleeping for $SLEEP_BETWEEN_HOSTS seconds before next host..."
                 sleep "$SLEEP_BETWEEN_HOSTS"
             fi
         done
@@ -674,11 +677,13 @@ install_yq() {
             fi
             
             echo "Processing: $hostname ($ip)"
+            echo "🔄 Starting backup for host: $hostname"
             
             path_count=$(yq -r ".hosts[$i].paths | length" "$CONFIG_FILE")
             for ((p=0; p<path_count; p++)); do
                 path=$(yq -r ".hosts[$i].paths[$p]" "$CONFIG_FILE")
                 echo "  Backing up: $path"
+                echo "  📂 Path: $path"
                 
                 use_ip=false
                 host_to_use="$hostname"
@@ -780,7 +785,7 @@ install_yq() {
                 if [[ "$backup_strategy" == "incremental" ]]; then
                     snapshot_dir="$(realpath "$dest_path")/../.snapshots"
                     mkdir -p "$snapshot_dir"
-                    echo "  Using incremental backup with snapshots in: $snapshot_dir"
+                    echo "  📸 Using incremental backup with snapshots in: $snapshot_dir"
                     
                     # Keep only the last 7 snapshots by default (configurable)
                     max_snapshots=7
@@ -829,8 +834,8 @@ install_yq() {
                     
                     # Calculate and display backup statistics
                     echo "  📊 Backup Statistics:"
-                    echo "    - Total Files: $(find "$(realpath "$dest_path")" -type f | wc -l)"
-                    echo "    - Total Size: $(du -sh "$(realpath "$dest_path")" | cut -f1)"
+                    echo "    - 📁 Total Files: $(find "$(realpath "$dest_path")" -type f | wc -l)"
+                    echo "    - 💾 Total Size: $(du -sh "$(realpath "$dest_path")" | cut -f1)"
                     
                     # If using incremental, show snapshot info
                     if [[ "$backup_strategy" == "incremental" && -d "$snapshot_dir" ]]; then
@@ -862,13 +867,14 @@ install_yq() {
                 echo "  Note: Some files may have been skipped due to permissions or other issues"
             done
             if [ "$SLEEP_BETWEEN_HOSTS" -gt 0 ]; then
-                echo "Sleeping for $SLEEP_BETWEEN_HOSTS seconds before next host..."
+                echo "⏱️ Sleeping for $SLEEP_BETWEEN_HOSTS seconds before next host..."
                 sleep "$SLEEP_BETWEEN_HOSTS"
             fi
         done
     fi
     
     echo "=== Backup Completed @ $(date) ==="
+    echo "🎉 Backup process completed!"
 } 2>&1 | tee -a "$LOG_FILE"
 
 # Create a symlink to the latest log for easy access
