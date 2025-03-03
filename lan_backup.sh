@@ -114,26 +114,10 @@ hosts:
 EOF
     chmod 600 "$CONFIG_FILE"
     
-    # Create sample .env file if it doesn't exist
-    if [ ! -f "$ENV_FILE" ]; then
-        echo "📝 Creating environment file for passwords..."
-        cat << EOF > "$ENV_FILE"
-# Environment file for secure password storage
-# This file should be kept secure and not shared
-
-# Format: HOST_PASSWORD=your_password_here
-EXAMPLE_HOST_PASSWORD=your_password_here
-
-# Add more passwords as needed
-EOF
-        chmod 600 "$ENV_FILE"
-        echo "✅ Sample environment file created at $ENV_FILE"
-    fi
-    
     echo "✅ Sample configuration created at $CONFIG_FILE"
     echo "⚠️ Please edit the configuration files before running the backup:"
     echo "   1. Edit config: nano $CONFIG_FILE"
-    echo "   2. Set passwords: nano $ENV_FILE"
+    echo "   2. Set passwords: nano $ENV_FILE (will be created automatically)"
     exit 0
 fi
 
@@ -145,7 +129,9 @@ if [ ! -f "$ENV_FILE" ]; then
 # This file should be kept secure and not shared
 
 # Format: HOST_PASSWORD=your_password_here
-# Add passwords for each host in your config file
+EXAMPLE_HOST_PASSWORD=your_password_here
+
+# Add more passwords as needed
 EOF
     chmod 600 "$ENV_FILE"
     echo "✅ Environment file created at $ENV_FILE"
