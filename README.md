@@ -24,7 +24,7 @@ A simple, secure system for backing up data from multiple hosts on a local netwo
 
 ## 🚀 Setup
 
-The backup system is now completely self-contained in a single script. To get started:
+The backup system is completely self-contained in a single script. To get started:
 
 1. Copy the `lan_backup.sh` script to your machine
 2. Make it executable:
