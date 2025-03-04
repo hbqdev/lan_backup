@@ -14,7 +14,7 @@ DEFAULT_BANDWIDTH_LIMIT=5120
 # Default sleep time between hosts in seconds (0 = no sleep)
 DEFAULT_SLEEP_BETWEEN_HOSTS=30
 
-# Add these near the top with other configurations
+# SSH and rsync configuration
 SSH_OPTS="-o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no"
 RSYNC_SSH_CMD="sshpass -p \"\$password_var\" ssh $SSH_OPTS"
 SCP_CMD="sshpass -p \"\$password_var\" scp $SSH_OPTS"
@@ -166,7 +166,7 @@ install_rsync() {
         sshpass -p "$password" ssh $SSH_OPTS "$user@$host" "$@"
     }
 
-    # Package manager detection and installation remains the same but uses ssh_command
+    # Package manager detection and installation
     if ssh_command "command -v apt-get" &>/dev/null; then
         echo "  📦 Debian/Ubuntu detected. Installing rsync using apt-get..."
         ssh_command "sudo apt-get update && sudo apt-get install -y rsync" || {
@@ -346,32 +346,28 @@ install_yq() {
     fi
 }
 
-# Fix 2: Use proper function declarations and variable scoping
+# Process host function with proper variable scoping
 process_host() {
     local i=$1
     local yq_cmd="$2"
     
-    # Extract host details using the provided yq command format
+    # Extract host details
     local hostname=$($yq_cmd ".hosts[$i].name" "$CONFIG_FILE")
     local ip=$($yq_cmd ".hosts[$i].ip" "$CONFIG_FILE")
     local user=$($yq_cmd ".hosts[$i].user" "$CONFIG_FILE")
     
-    # Try to get password_key first (new format)
+    # Get password key or direct password
     local password_key=$($yq_cmd ".hosts[$i].password_key" "$CONFIG_FILE")
     
-    # If password_key is null or empty, try the old format with password
     if [[ "$password_key" == "null" || -z "$password_key" ]]; then
         local password_raw=$($yq_cmd ".hosts[$i].password" "$CONFIG_FILE")
-        # If it starts with a variable name, use it as a key
         if [[ "$password_raw" == *"_PASSWORD"* ]]; then
             password_key=$(echo "$password_raw" | tr -d '"')
             local password_var="${!password_key}"
         else
-            # Otherwise use the raw password
             local password_var=$(echo "$password_raw" | tr -d '"')
         fi
     else
-        # Get password from environment variable
         local password_var="${!password_key}"
     fi
     
@@ -385,12 +381,12 @@ process_host() {
     echo "Processing: $hostname ($ip)"
     echo "🔄 Starting backup for host: $hostname"
     
-    # Path processing with proper variable scoping
+    # Process each path
     local path_count=$($yq_cmd ".hosts[$i].paths | length" "$CONFIG_FILE")
     for ((p=0; p<path_count; p++)); do
         local path=$($yq_cmd ".hosts[$i].paths[$p]" "$CONFIG_FILE")
         
-        # Destination path construction with validation
+        # Destination path
         local dest_path="${BACKUP_ROOT}/${hostname}${path}"
         if [[ -z "$dest_path" ]]; then
             echo "❌ Invalid destination path for $hostname:$path"
@@ -403,7 +399,7 @@ process_host() {
         local use_ip=false
         local host_to_use="$hostname"
 
-        # Consolidated connection check
+        # Connection check function
         check_connection() {
             local target=$1
             if sshpass -p "$password_var" ssh $SSH_OPTS "$user@$target" "ls -la $path" &>/dev/null; then
@@ -413,7 +409,7 @@ process_host() {
             fi
         }
 
-        # Simplified connection check
+        # Try hostname first, then IP
         if check_connection "$hostname"; then
             echo "  ✅ Hostname connection successful."
             host_to_use="$hostname"
@@ -429,7 +425,7 @@ process_host() {
         mkdir -p "$dest_path"
         echo "  Destination path: $dest_path"
         
-        # Consolidated rsync check
+        # Check if rsync is installed
         check_rsync_installed() {
             sshpass -p "$password_var" ssh $SSH_OPTS "$user@$host_to_use" "which rsync" &>/dev/null
         }
@@ -448,17 +444,16 @@ process_host() {
             echo "  ✅ rsync is already installed on remote host."
         fi
         
-        # Try to get host-specific bandwidth limit
+        # Get host-specific bandwidth limit
         local host_bandwidth_limit=$($yq_cmd ".hosts[$i].bandwidth_limit" "$CONFIG_FILE")
         if [[ "$host_bandwidth_limit" == "null" || -z "$host_bandwidth_limit" ]]; then
             host_bandwidth_limit=$BANDWIDTH_LIMIT
         fi
         
-        # Use a more robust backup strategy based on industry standards
-        # Define backup strategy options
+        # Select backup strategy
         echo "  Selecting appropriate backup strategy..."
         
-        # Define backup strategies with clear purposes
+        # Define backup strategies
         declare -A backup_strategies
         backup_strategies=(
             ["mirror"]="--archive --hard-links --acls --xattrs --delete --delete-excluded --progress --stats --timeout=120 --no-compress"
@@ -470,10 +465,10 @@ process_host() {
             # ["root-access"]="--archive --whole-file --block-size=128K --hard-links --acls --xattrs --super --numeric-ids --info=progress2 --timeout=180 --no-compress" #Commented out
         )
         
-        # Default strategy (can be overridden in config)
+        # Default strategy
         local backup_strategy="large-incremental"
         
-        # Try to get host-specific backup strategy
+        # Get host-specific backup strategy
         local host_backup_strategy=$($yq_cmd ".hosts[$i].backup_strategy" "$CONFIG_FILE" 2>/dev/null)
         if [[ "$host_backup_strategy" != "null" && -n "$host_backup_strategy" ]]; then
             if [[ -n "${backup_strategies[$host_backup_strategy]}" ]]; then
@@ -483,7 +478,7 @@ process_host() {
             fi
         fi
         
-        # Get the rsync options for the selected strategy
+        # Get rsync options for selected strategy
         local rsync_opts="${backup_strategies[$backup_strategy]}"
         
         # Add common options
@@ -501,7 +496,7 @@ process_host() {
             mkdir -p "$snapshot_dir"
             echo "  📸 Using incremental backup with snapshots in: $snapshot_dir"
             
-            # Keep only the last 7 snapshots by default (configurable)
+            # Manage snapshots retention
             local max_snapshots=7
             local host_max_snapshots=$($yq_cmd ".hosts[$i].max_snapshots" "$CONFIG_FILE" 2>/dev/null)
             if [[ "$host_max_snapshots" != "null" && -n "$host_max_snapshots" ]]; then
@@ -518,13 +513,13 @@ process_host() {
         
         echo "  Using backup strategy: $backup_strategy"
         
-        # Make sure destination directory exists and is accessible
+        # Make sure destination directory exists
         mkdir -p "$dest_path"
         
-        # Change to script directory to avoid getcwd errors
+        # Change to script directory
         cd "$SCRIPT_DIR"
         
-        # Add exclusion patterns if specified in config
+        # Add exclusion patterns if specified
         local exclusion_opts=""
         local exclusion_count=$($yq_cmd ".hosts[$i].exclude | length" "$CONFIG_FILE" 2>/dev/null)
         if [[ "$exclusion_count" != "null" && "$exclusion_count" -gt 0 ]]; then
@@ -535,16 +530,13 @@ process_host() {
             echo "  Using exclusion patterns: $exclusion_opts"
         fi
         
-        # Use absolute paths for both source and destination
-        echo "  Starting backup with $backup_strategy strategy..."
-        
-        # Consolidated sudo check
+        # Check if sudo is needed for root-owned files
         check_sudo_access() {
             sshpass -p "$password_var" ssh $SSH_OPTS "$user@$host_to_use" \
                 "find \"$path\" -user root | grep -q ." &>/dev/null
         }
 
-        # Check if we need to use sudo for root-owned files
+        # Check for root-owned files
         local use_sudo=false
         if check_sudo_access; then
             echo "  🔒 Root-owned files detected, attempting to use sudo..."
@@ -560,26 +552,26 @@ process_host() {
             fi
         fi
         
-        # Updated rsync command construction
+        # Build rsync command
         if [ "$use_sudo" = true ]; then
             rsync_command="rsync $rsync_opts $exclusion_opts --rsync-path='sudo rsync' --rsh=\"$RSYNC_SSH_CMD\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
         else
             rsync_command="rsync $rsync_opts $exclusion_opts --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
         fi
         
-        # Execute the rsync command
+        # Execute rsync
         if eval "$rsync_command"; then
             echo "  ✅ Backup successful with $backup_strategy strategy."
             
-            # Create a success marker file with timestamp
+            # Create success marker
             echo "$(date)" > "$(realpath "$dest_path")/.backup_success"
             
-            # Calculate and display backup statistics
+            # Show backup stats
             echo "  📊 Backup Statistics:"
             echo "    - 📁 Total Files: $(find "$(realpath "$dest_path")" -type f | wc -l)"
             echo "    - 💾 Total Size: $(du -sh "$(realpath "$dest_path")" | cut -f1)"
             
-            # If using incremental, show snapshot info
+            # Show snapshot info if applicable
             if [[ "$backup_strategy" == "incremental" && -d "$snapshot_dir" ]]; then
                 local latest_snapshot=$(ls -1t "$snapshot_dir" 2>/dev/null | head -n 1)
                 if [[ -n "$latest_snapshot" ]]; then
@@ -592,16 +584,11 @@ process_host() {
             echo "  ❌ Backup failed with $backup_strategy strategy."
             echo "  ⚠️ Trying with safe strategy as fallback..."
             
-            # Fallback to safe strategy if the chosen strategy fails
+            # Fallback to safe strategy
             if [ "$use_sudo" = true ]; then
-                # Use safe strategy with sudo and more verbose options
                 echo "  Using safe strategy with sudo as fallback..."
-                
-                # Reuse the existing tmp_script that was already tested
-                # Use the temporary script with simpler options
                 local rsync_command="rsync --archive --update --super --numeric-ids --verbose --stats --rsync-path=\"$tmp_script\" --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no -v\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
             else
-                # Standard safe strategy without sudo - simplified options
                 echo "  Using standard safe strategy as fallback..."
                 local rsync_command="rsync --archive --update --verbose --stats --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no -v\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
             fi
