@@ -6,11 +6,10 @@ A simple, secure system for backing up data from multiple hosts on a local netwo
 
 - 🖥️ Backs up multiple hosts and paths
 - 🌐 Supports both hostname and IP-based connections
-- 🔄 Multiple backup strategies (mirror, incremental, safe, gentle, large-files, large-incremental, root-access)
+- 🔄 Multiple backup strategies (mirror, incremental, safe, large-incremental)
 - 📸 Incremental backups with configurable snapshot retention
 - 🔍 Automatically detects and adapts to different YQ versions
 - 📦 Automatically installs rsync on remote hosts if missing
-- 🔄 Falls back to SCP if rsync installation fails
 - 🔒 Secure password management via environment file
 - 🚀 Bandwidth control with configurable limits
 - 🌐 Network-friendly options to prevent connection saturation
@@ -20,7 +19,7 @@ A simple, secure system for backing up data from multiple hosts on a local netwo
 - 🛡️ Automatic fallback to safer strategies if preferred strategy fails
 - 🔐 Support for backing up root-owned files with sudo
 - 🧪 Automatic testing of sudo access before backup
-- 🔄 Graceful degradation if sudo access is unavailable
+- 🔄 Graceful degradation if sudo access is unavailable (skips paths instead of failing)
 
 ## 🚀 Setup
 
@@ -40,7 +39,7 @@ The backup system is completely self-contained in a single script. To get starte
 
 ## 🔄 Backup Strategies
 
-The script supports seven different backup strategies that can be configured per host:
+The script supports four different backup strategies that can be configured per host:
 
 1. **Mirror** (`mirror`):
    - 🪞 Creates an exact copy of the source at the destination
@@ -56,25 +55,10 @@ The script supports seven different backup strategies that can be configured per
    - 🛡️ Only adds or updates files, never deletes anything
    - ✅ Good for cautious backups where data preservation is critical
 
-4. **Gentle** (`gentle`):
-   - 🌐 Network-friendly strategy that minimizes bandwidth usage
-   - 🔄 Uses size-only comparison and in-place updates to reduce network traffic
-   - ✅ Best for unstable networks or when backing up over slow connections
-
-5. **Large Files** (`large-files`):
-   - 📦 Optimized for transferring large files
-   - 🚀 Uses whole-file transfer to avoid delta calculations
-   - ✅ Best for media files, virtual machine images, and other large binary files
-
-6. **Large Incremental** (`large-incremental`) - Default:
+4. **Large Incremental** (`large-incremental`) - Default:
    - 📦 Combines large file optimization with incremental backup features
    - 📸 Preserves previous versions while optimizing for large file transfers
    - ✅ Ideal for backing up mixed content with both large and small files
-
-7. **Root Access** (`root-access`):
-   - 🔐 Automatically used when root-owned files are detected
-   - 🛡️ Preserves ownership and permissions of system files
-   - ✅ Perfect for backing up system directories or mixed-ownership content
 
 ## ⚙️ Configuration
 
@@ -93,7 +77,7 @@ hosts:
     # Optional: Set bandwidth limit in KB/s for this host (overrides global setting)
     # bandwidth_limit: 2048
     
-    # Optional: Backup strategy (mirror, incremental, safe, gentle, large-files, large-incremental, root-access)
+    # Optional: Backup strategy (mirror, incremental, safe, large-incremental)
     # backup_strategy: large-incremental
     
     # Optional: Maximum number of snapshots to keep (for incremental strategy)

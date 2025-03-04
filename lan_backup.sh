@@ -431,25 +431,18 @@ process_host() {
         
         # Consolidated rsync check
         check_rsync_installed() {
-            sshpass -p "$password_var" ssh $SSH_OPTS "$user@$hostname" "which rsync" &>/dev/null
-        }
-
-        # Consolidated SCP fallback
-        scp_fallback() {
-            echo "  Starting forced scp copy..."
-            $SCP_CMD -r -f "$user@$hostname:$path/*" "$dest_path/" || 
-            $SCP_CMD -r -f "$user@$ip:$path/*" "$dest_path/"
+            sshpass -p "$password_var" ssh $SSH_OPTS "$user@$host_to_use" "which rsync" &>/dev/null
         }
 
         if ! check_rsync_installed; then
             echo "  ⚠️ WARNING: rsync not found on remote host."
-            
+
             # Try to install rsync
-            if install_rsync "$hostname" "$user" "$password_var"; then
+            if install_rsync "$host_to_use" "$user" "$password_var"; then
                 echo "  ✅ rsync installed successfully. Proceeding with rsync backup."
             else
-                echo "  ⚠️ Could not install rsync. Falling back to scp."
-                scp_fallback
+                echo "  ❌ Could not install rsync. Skipping this path."
+                continue # Skip to the next path if rsync install fails
             fi
         else
             echo "  ✅ rsync is already installed on remote host."
@@ -471,10 +464,10 @@ process_host() {
             ["mirror"]="--archive --hard-links --acls --xattrs --delete --delete-excluded --progress --stats --timeout=120 --no-compress"
             ["incremental"]="--archive --hard-links --acls --xattrs --backup --backup-dir=\"$(realpath "$dest_path")/../.snapshots/$(date +%Y-%m-%d_%H-%M-%S)\" --progress --stats --timeout=120 --no-compress --block-size=128K"
             ["safe"]="--archive --hard-links --acls --xattrs --update --progress --stats --timeout=120 --no-compress --block-size=128K"
-            ["gentle"]="--archive --update --no-compress --timeout=120 --contimeout=60 --inplace --size-only --progress --stats --block-size=128K"
-            ["large-files"]="--archive --whole-file --block-size=128K --info=progress2 --timeout=120 --no-compress"
+            # ["gentle"]="--archive --update --no-compress --timeout=120 --contimeout=60 --inplace --size-only --progress --stats --block-size=128K"  # Commented out - remove if never used
+            # ["large-files"]="--archive --whole-file --block-size=128K --info=progress2 --timeout=120 --no-compress" # Commented out - remove if never used
             ["large-incremental"]="--archive --whole-file --block-size=128K --hard-links --acls --xattrs --backup --backup-dir=\"$(realpath "$dest_path")/../.snapshots/$(date +%Y-%m-%d_%H-%M-%S)\" --info=progress2 --timeout=180 --no-compress"
-            ["root-access"]="--archive --whole-file --block-size=128K --hard-links --acls --xattrs --super --numeric-ids --info=progress2 --timeout=180 --no-compress"
+            # ["root-access"]="--archive --whole-file --block-size=128K --hard-links --acls --xattrs --super --numeric-ids --info=progress2 --timeout=180 --no-compress" #Commented out
         )
         
         # Default strategy (can be overridden in config)
@@ -548,14 +541,7 @@ process_host() {
         # Consolidated sudo check
         check_sudo_access() {
             sshpass -p "$password_var" ssh $SSH_OPTS "$user@$host_to_use" \
-                "find $path -maxdepth 1 -user root | grep -q ." &>/dev/null
-        }
-
-        # Consolidated temporary script creation
-        create_temp_script() {
-            local script_content=$1
-            sshpass -p "$password_var" ssh $SSH_OPTS "$user@$host_to_use" \
-                "cat > $tmp_script << 'EOF'\n$script_content\nEOF\nchmod +x $tmp_script"
+                "find \"$path\" -user root | grep -q ." &>/dev/null
         }
 
         # Check if we need to use sudo for root-owned files
@@ -576,7 +562,7 @@ process_host() {
         
         # Updated rsync command construction
         if [ "$use_sudo" = true ]; then
-            rsync_command="$RSYNC_BASE_CMD $rsync_opts $exclusion_opts \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+            rsync_command="rsync $rsync_opts $exclusion_opts --rsync-path='sudo rsync' --rsh=\"$RSYNC_SSH_CMD\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
         else
             rsync_command="rsync $rsync_opts $exclusion_opts --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
         fi
