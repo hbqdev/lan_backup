@@ -369,36 +369,3 @@ check_rsync_remote() {
     fi
     return 0
 }
-
-process_path() {
-    local hostname=$1
-    local host_to_use=$2
-    local user=$3
-    local password=$4
-    local path=$5
-    local backup_strategy=$6
-    local bandwidth_limit=$7
-    local exclude_patterns=$8
-
-    echo "  Processing path: $path (Strategy: \"$backup_strategy\")"
-    
-    # Check remote path accessibility
-    if ! sshpass -p "$password" ssh $SSH_OPTS "$user@$host_to_use" "test -e '$path'"; then
-        echo "⚠️ WARNING: Cannot access $path on \"$hostname\" (\"$host_to_use\"). Will try to backup anyway..."
-    fi
-
-    # Create destination path
-    local dest_path="$BACKUP_ROOT/$hostname$path"
-    echo "  Destination path: $dest_path"
-    mkdir -p "$dest_path"
-
-    echo "  Backing up: $path"
-    echo "  📂 Path: $path"
-
-    # Check and install rsync if needed
-    if ! check_rsync_remote "$hostname" "$user" "$password" "$host_to_use"; then
-        return 1
-    fi
-
-    # Rest of the function remains the same...
-} 
