@@ -98,20 +98,21 @@ Options:
 
 ```
 lan_backup/
-├── configs/ # Configuration files
-│ ├── backup_config.yaml # Host configuration
-│ └── .env # Environment variables & passwords
-├── corelib/ # Core library files
-│ └── backup_functions.sh
-├── scripts/ # Utility scripts
-│ ├── verify_backup.sh # Backup verification
-│ ├── install_yq.sh # YQ installation
-│ └── setup_lan_backup.sh
-├── data/ # Backup storage location
-├── logs/ # Backup logs
-├── config/ # Legacy config (deprecated)
-├── lan_backup.sh # Main backup script
-└── .gitignore # Git ignore rules
+├── config/                # Core script configuration
+│   └── backup_vars.sh    # Script variables and defaults
+├── configs/              # User configuration
+│   ├── backup_config.yaml # Host configuration
+│   └── .env              # Environment variables & passwords
+├── corelib/              # Core library files
+│   └── backup_functions.sh
+├── scripts/              # Utility scripts
+│   ├── verify_backup.sh  # Backup verification
+│   ├── install_yq.sh     # YQ installation
+│   └── setup_lan_backup.sh
+├── data/                 # Backup storage location
+├── logs/                 # Backup logs
+├── lan_backup.sh        # Main backup script
+└── .gitignore           # Git ignore rules
 
 ```
 
