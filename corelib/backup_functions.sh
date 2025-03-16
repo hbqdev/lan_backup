@@ -225,6 +225,11 @@ process_host() {
             echo "    - 📁 Total Files: $(find "$(realpath "$dest_path")" -type f | wc -l)"
             echo "    - 💾 Total Size: $(du -sh "$(realpath "$dest_path")" | cut -f1)"
             
+            # Check rsync output for permission denied or other errors
+            if [[ "$rsync_command" =~ --verbose ]] && [[ $(eval "$rsync_command" 2>&1) =~ "Permission denied" ]]; then
+                echo "  ⚠️ Some files were skipped due to permission issues"
+            fi
+            
             # Show snapshot info if applicable
             if [[ "$host_strategy" == "incremental" && -d "$snapshot_dir" ]]; then
                 local latest_snapshot=$(ls -1t "$snapshot_dir" 2>/dev/null | head -n 1)
