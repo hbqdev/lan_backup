@@ -55,7 +55,13 @@ process_host() {
             path=$($yq_cmd ".hosts[$i].paths[$p]" "$CONFIG_FILE")
         fi
         
-        echo "  Processing path: $path (Strategy: \"$host_strategy\")"
+        # Get path-specific backup strategy if it exists
+        local path_strategy=$($yq_cmd ".hosts[$i].paths[$p].backup_strategy" "$CONFIG_FILE")
+        if [[ "$path_strategy" == "null" || -z "$path_strategy" ]]; then
+            path_strategy="$host_strategy"  # Use host strategy if no path-specific strategy
+        fi
+        
+        echo "  Processing path: $path (Strategy: \"$path_strategy\")"
         
         # Connection check function
         check_connection() {
@@ -114,13 +120,14 @@ process_host() {
         echo "  Selecting appropriate backup strategy..."
         
         # Check if this is a special backup type
-        if [[ " ${SPECIAL_BACKUP_TYPES[@]} " =~ " $host_strategy " ]]; then
-            case $host_strategy in
+        if [[ " ${SPECIAL_BACKUP_TYPES[@]} " =~ " $path_strategy " ]]; then
+            case $path_strategy in
                 "postgres")
-                    backup_postgres "$host_to_use" "$path" "$dest_path" "$password_var" "$user"
+                    local postgres_config=$($yq_cmd ".hosts[$i].paths[$p].postgres" "$CONFIG_FILE")
+                    backup_postgres "$host_to_use" "$path" "$dest_path" "$password_var" "$user" "$postgres_config"
                     ;;
                 *)
-                    echo "  ❌ Unknown special backup type: $host_strategy"
+                    echo "  ❌ Unknown special backup type: $path_strategy"
                     return 1
                     ;;
             esac
@@ -128,9 +135,9 @@ process_host() {
         fi
         
         # Get rsync options for selected strategy
-        local rsync_opts="${backup_strategies[$host_strategy]}"
+        local rsync_opts="${backup_strategies[$path_strategy]}"
         if [[ -z "$rsync_opts" ]]; then
-            echo "  ❌ Unknown backup strategy: $host_strategy"
+            echo "  ❌ Unknown backup strategy: $path_strategy"
             echo "  ⚠️ Falling back to safe strategy..."
             rsync_opts="${backup_strategies[safe]}"
         fi
@@ -145,7 +152,7 @@ process_host() {
         fi
         
         # Create snapshot directory if using incremental backup
-        if [[ "$host_strategy" == "incremental" || "$host_strategy" == "large-incremental" ]]; then
+        if [[ "$path_strategy" == "incremental" || "$path_strategy" == "large-incremental" ]]; then
             local snapshot_dir="$(realpath "$dest_path")/../.snapshots"
             mkdir -p "$snapshot_dir"
             echo "  📸 Using incremental backup with snapshots in: $snapshot_dir"
@@ -165,7 +172,7 @@ process_host() {
             fi
         fi
         
-        echo "  Using backup strategy: $host_strategy"
+        echo "  Using backup strategy: $path_strategy"
         
         # Make sure destination directory exists
         mkdir -p "$dest_path"
@@ -215,7 +222,7 @@ process_host() {
         
         # Execute rsync
         if eval "$rsync_command"; then
-            echo "  ✅ Backup successful with $host_strategy strategy."
+            echo "  ✅ Backup successful with $path_strategy strategy."
             
             # Create success marker
             echo "$(date)" > "$(realpath "$dest_path")/.backup_success"
@@ -226,7 +233,7 @@ process_host() {
             echo "    - 💾 Total Size: $(du -sh "$(realpath "$dest_path")" | cut -f1)"
             
             # Show snapshot info if applicable
-            if [[ "$host_strategy" == "incremental" && -d "$snapshot_dir" ]]; then
+            if [[ "$path_strategy" == "incremental" && -d "$snapshot_dir" ]]; then
                 local latest_snapshot=$(ls -1t "$snapshot_dir" 2>/dev/null | head -n 1)
                 if [[ -n "$latest_snapshot" ]]; then
                     echo "    - Latest Snapshot: $latest_snapshot"
@@ -235,7 +242,7 @@ process_host() {
                 fi
             fi
         else
-            echo "  ❌ Backup failed with $host_strategy strategy."
+            echo "  ❌ Backup failed with $path_strategy strategy."
             echo "  ⚠️ Trying with safe strategy as fallback..."
             
             # Fallback to safe strategy
