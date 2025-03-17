@@ -63,6 +63,28 @@ process_host() {
         
         echo "  Processing path: $path (Strategy: \"$path_strategy\")"
         
+        # Check if this is a special backup type
+        if [[ " ${SPECIAL_BACKUP_TYPES[@]} " =~ " $path_strategy " ]]; then
+            case $path_strategy in
+                "postgres")
+                    local postgres_config=$($yq_cmd ".hosts[$i].paths[$p].postgres" "$CONFIG_FILE")
+                    backup_postgres "$hostname" "$path" "$dest_path" "$password_var" "$user" "$postgres_config"
+                    ;;
+                *)
+                    echo "  ❌ Unknown special backup type: $path_strategy"
+                    return 1
+                    ;;
+            esac
+            continue
+        fi
+        
+        # Create destination path
+        local dest_path="${BACKUP_ROOT}/${hostname}${path}"
+        mkdir -p "$dest_path"
+        echo "  Destination path: $dest_path"
+        echo "  Backing up: $path"
+        echo "  📂 Path: $path"
+        
         # Connection check function
         check_connection() {
             local target=$1
@@ -85,13 +107,6 @@ process_host() {
             echo "⚠️ WARNING: Cannot access $path on $hostname ($ip). Will try to backup anyway..."
             host_to_use="$ip"
         fi
-        
-        # Create destination path
-        local dest_path="${BACKUP_ROOT}/${hostname}${path}"
-        mkdir -p "$dest_path"
-        echo "  Destination path: $dest_path"
-        echo "  Backing up: $path"
-        echo "  📂 Path: $path"
         
         # Check if rsync is installed
         check_rsync_installed() {
@@ -118,21 +133,6 @@ process_host() {
         
         # Select backup strategy
         echo "  Selecting appropriate backup strategy..."
-        
-        # Check if this is a special backup type
-        if [[ " ${SPECIAL_BACKUP_TYPES[@]} " =~ " $path_strategy " ]]; then
-            case $path_strategy in
-                "postgres")
-                    local postgres_config=$($yq_cmd ".hosts[$i].paths[$p].postgres" "$CONFIG_FILE")
-                    backup_postgres "$host_to_use" "$path" "$dest_path" "$password_var" "$user" "$postgres_config"
-                    ;;
-                *)
-                    echo "  ❌ Unknown special backup type: $path_strategy"
-                    return 1
-                    ;;
-            esac
-            continue
-        fi
         
         # Get rsync options for selected strategy
         local rsync_opts="${backup_strategies[$path_strategy]}"
