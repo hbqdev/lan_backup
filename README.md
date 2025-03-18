@@ -114,6 +114,7 @@ lan_backup/
 - **YQ Version Mismatch**: Run `scripts/install_yq.sh`
 - **SSH Connection Issues**: Check host connectivity and passwords
 - **Permission Errors**: Verify sudo access on remote hosts
+- **Vanishing Files Warning**: Normal when backing up active databases (PostgreSQL, MySQL, etc.) - these warnings are automatically handled and won't affect backup integrity
 
 ## 📝 Notes
 

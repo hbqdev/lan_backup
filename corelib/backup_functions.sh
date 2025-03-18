@@ -227,24 +227,43 @@ process_host() {
                 fi
             fi
         else
-            echo "  ❌ Backup failed with $path_strategy strategy."
-            echo "  ⚠️ Trying with safe strategy as fallback..."
-            
-            # Fallback to safe strategy
-            if [ "$use_sudo" = true ]; then
-                echo "  Using safe strategy with sudo as fallback..."
-                local rsync_command="rsync --archive --update --super --numeric-ids --verbose --stats --rsync-path=\"$tmp_script\" --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no -v\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
-            else
-                echo "  Using standard safe strategy as fallback..."
-                local rsync_command="rsync --archive --update --verbose --stats --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no -v\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
-            fi
-            
-            if eval "$rsync_command"; then
-                echo "  ✅ Backup successful with safe fallback strategy."
+            local rsync_exit_code=$?
+            if [ $rsync_exit_code -eq 24 ]; then
+                echo "  ⚠️ Rsync reported vanished files during transfer (code 24)"
+                echo "  ✅ This is normal for active databases and the backup is considered successful"
                 echo "$(date)" > "$(realpath "$dest_path")/.backup_success"
+                
+                # Show backup stats
+                echo "  📊 Backup Statistics:"
+                echo "    - 📁 Total Files: $(find "$(realpath "$dest_path")" -type f | wc -l)"
+                echo "    - 💾 Total Size: $(du -sh "$(realpath "$dest_path")" | cut -f1)"
             else
-                echo "  ❌ Backup failed with safe fallback strategy."
-                echo "$(date)" > "$(realpath "$dest_path")/.backup_failed"
+                echo "  ❌ Backup failed with $path_strategy strategy (exit code $rsync_exit_code)."
+                echo "  ⚠️ Trying with safe strategy as fallback..."
+                
+                # Fallback to safe strategy
+                if [ "$use_sudo" = true ]; then
+                    echo "  Using safe strategy with sudo as fallback..."
+                    local rsync_command="rsync --archive --update --super --numeric-ids --verbose --stats --rsync-path=\"$tmp_script\" --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no -v\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+                else
+                    echo "  Using standard safe strategy as fallback..."
+                    local rsync_command="rsync --archive --update --verbose --stats --rsh=\"sshpass -p \\\"$password_var\\\" ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no -v\" \"$user@$host_to_use:$path/\" \"$(realpath "$dest_path")/\""
+                fi
+                
+                if eval "$rsync_command"; then
+                    echo "  ✅ Backup successful with safe fallback strategy."
+                    echo "$(date)" > "$(realpath "$dest_path")/.backup_success"
+                else
+                    local fallback_exit_code=$?
+                    if [ $fallback_exit_code -eq 24 ]; then
+                        echo "  ⚠️ Rsync reported vanished files during fallback transfer (code 24)"
+                        echo "  ✅ This is normal for active databases and the backup is considered successful"
+                        echo "$(date)" > "$(realpath "$dest_path")/.backup_success"
+                    else
+                        echo "  ❌ Backup failed with safe fallback strategy (exit code $fallback_exit_code)."
+                        echo "$(date)" > "$(realpath "$dest_path")/.backup_failed"
+                    fi
+                fi
             fi
         fi
         
