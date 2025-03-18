@@ -5,7 +5,6 @@ A robust system for backing up self-hosted services across multiple LAN hosts.
 ## ✨ Features
 
 - 🔄 Multiple backup strategies (mirror, incremental, safe)
-- 🐘 Specialized PostgreSQL backup support
 - 🔒 Secure password management
 - 🚀 Configurable bandwidth control
 - 📊 Detailed logging and verification
@@ -61,12 +60,6 @@ hosts:
     bandwidth_limit: 3072  # Optional: 3MB/s
     paths:
       - path: /home/user/data
-      
-      # PostgreSQL backup
-      - path: /path/to/postgres
-        backup_strategy: postgres
-        postgres:
-          database: mydb
     
     exclude:
       - "*.tmp"
@@ -92,7 +85,6 @@ Options:
 - **large-incremental** (default): Optimized for mixed content
 - **mirror**: Exact source replica
 - **safe**: Never deletes destination files
-- **postgres**: PostgreSQL database backup
 
 ## 📁 Directory Structure
 

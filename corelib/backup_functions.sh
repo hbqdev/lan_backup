@@ -63,21 +63,6 @@ process_host() {
         
         echo "  Processing path: $path (Strategy: \"$path_strategy\")"
         
-        # Check if this is a special backup type
-        if [[ " ${SPECIAL_BACKUP_TYPES[@]} " =~ " $path_strategy " ]]; then
-            case $path_strategy in
-                "postgres")
-                    local postgres_config=$($yq_cmd ".hosts[$i].paths[$p].postgres" "$CONFIG_FILE")
-                    backup_postgres "$hostname" "$path" "$dest_path" "$password_var" "$user" "$postgres_config"
-                    ;;
-                *)
-                    echo "  ❌ Unknown special backup type: $path_strategy"
-                    return 1
-                    ;;
-            esac
-            continue
-        fi
-        
         # Create destination path
         local dest_path="${BACKUP_ROOT}/${hostname}${path}"
         mkdir -p "$dest_path"
@@ -143,7 +128,7 @@ process_host() {
         fi
         
         # Add common options
-        rsync_opts="$rsync_opts --human-readable --partial --info=progress2 --no-inc-recursive"
+        rsync_opts="$rsync_opts --human-readable --partial --info=progress2 --no-inc-recursive --ignore-errors --ignore-missing-args"
         
         # Add bandwidth limit if set
         if [ "$host_bandwidth_limit" -gt 0 ]; then
@@ -266,62 +251,6 @@ process_host() {
         echo "  ✅ Backup attempt completed"
         ls -la "$dest_path"
     done
-}
-
-# Function to backup PostgreSQL database in Docker
-backup_postgres() {
-    local host=$1
-    local path=$2
-    local dest_path=$3
-    local password=$4
-    local user=$5
-    local postgres_config=$6
-
-    echo "  🐘 Performing PostgreSQL backup for Docker container at $path"
-    
-    # Create postgres backup directory if it doesn't exist
-    mkdir -p "$dest_path"
-    
-    # Get postgres configuration
-    local db_name=$(echo "$postgres_config" | yq -r '.database')
-    local container_name="immich_postgres"  # This is from your docker-compose
-    
-    # Generate timestamp for backup file
-    local timestamp=$(date +"%Y%m%d_%H%M%S")
-    local backup_file="backup_${timestamp}.sql"
-    
-    # Create the docker pg_dump command
-    local pg_dump_cmd="docker exec $container_name pg_dump -U \$DB_USERNAME -d \$DB_DATABASE_NAME -Fc -f /tmp/$backup_file && docker cp $container_name:/tmp/$backup_file $dest_path/ && docker exec $container_name rm /tmp/$backup_file"
-    
-    # Execute pg_dump through SSH with sudo
-    if sshpass -p "$password" ssh $SSH_OPTS "$user@$host" "echo \"$password\" | sudo -S bash -c '$pg_dump_cmd'"; then
-        echo "  ✅ PostgreSQL Docker backup completed successfully"
-        echo "  📊 Backup Statistics:"
-        echo "    - 📁 Backup File: $backup_file"
-        echo "    - 💾 Backup Size: $(du -sh "$dest_path/$backup_file" 2>/dev/null | cut -f1)"
-        
-        # Keep only the latest 5 backups
-        find "$dest_path" -name "backup_*.sql" -type f | sort -r | tail -n +6 | xargs rm -f 2>/dev/null
-        
-        # Create success marker
-        echo "$(date)" > "$dest_path/.backup_success"
-        
-        # Also backup the Docker volume directory with sudo
-        local volume_backup_cmd="tar czf $dest_path/postgres_data_${timestamp}.tar.gz -C $(dirname $path) $(basename $path)"
-        if sshpass -p "$password" ssh $SSH_OPTS "$user@$host" "echo \"$password\" | sudo -S bash -c '$volume_backup_cmd'"; then
-            echo "  ✅ PostgreSQL data directory backup completed successfully"
-            echo "  💾 Data directory backup size: $(du -sh "$dest_path/postgres_data_${timestamp}.tar.gz" 2>/dev/null | cut -f1)"
-            
-            # Keep only the latest 5 volume backups
-            find "$dest_path" -name "postgres_data_*.tar.gz" -type f | sort -r | tail -n +6 | xargs rm -f 2>/dev/null
-        else
-            echo "  ❌ PostgreSQL data directory backup failed"
-        fi
-    else
-        echo "  ❌ PostgreSQL backup failed"
-        echo "$(date)" > "$dest_path/.backup_failed"
-        return 1
-    fi
 }
 
 # Function to install rsync on remote host

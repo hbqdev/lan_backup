@@ -33,8 +33,6 @@ backup_strategies=(
     ["large-incremental"]="--archive --whole-file --block-size=128K --hard-links --acls --xattrs --backup --backup-dir=\"\$(realpath \"\$dest_path\")/../.snapshots/\$(date +%Y-%m-%d_%H-%M-%S)\" --info=progress2 --timeout=180 --no-compress"
 )
 
-# Special backup types that don't use rsync
-SPECIAL_BACKUP_TYPES=("postgres")
 
 # Add YQ version specification
 YQ_VERSION="v4.45.1"
